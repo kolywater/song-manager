@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+
+# Build artifacts
+build/
+Export/
+
+# Song data (large binary files)
+Songs/
+
+# App icon source
+appIcon.icon/
