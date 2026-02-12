@@ -1,9 +1,19 @@
 import AppKit
 import Observation
+import SwiftUI
+
+private let songMetadataFilename = "SongManagerData.json"
+
+enum SortMode: String, CaseIterable {
+    case custom = "Custom"
+    case alphabetical = "Alphabetical"
+    case latestModified = "Last Modified"
+}
 
 @Observable
 final class ProjectStore {
     var projects: [ProjectReference] = []
+    var sortMode: SortMode = .custom
     var albumArtCache: [UUID: NSImage] = [:]
     var errorMessage: String?
 
@@ -14,25 +24,132 @@ final class ProjectStore {
         return folder.appending(path: "projects.json")
     }
 
+    var sortedProjects: [ProjectReference] {
+        switch sortMode {
+        case .custom:
+            return projects
+        case .alphabetical:
+            return projects.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        case .latestModified:
+            return projects.sorted { a, b in
+                switch (a.latestALSModDate, b.latestALSModDate) {
+                case let (dateA?, dateB?): return dateA > dateB
+                case (_?, nil): return true
+                case (nil, _?): return false
+                case (nil, nil): return false
+                }
+            }
+        }
+    }
+
     init() {
         load()
+        if let raw = UserDefaults.standard.string(forKey: "sortMode"),
+           let mode = SortMode(rawValue: raw) {
+            sortMode = mode
+        }
+    }
+
+    // MARK: - Per-Song Metadata Helpers
+
+    private func songMetadataURL(for rootURL: URL) -> URL {
+        rootURL.appending(path: songMetadataFilename)
+    }
+
+    private func loadSongMetadata(from rootURL: URL) -> SongMetadata? {
+        let url = songMetadataURL(for: rootURL)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SongMetadata.self, from: data)
+    }
+
+    private func saveSongMetadata(_ metadata: SongMetadata, to rootURL: URL) {
+        let url = songMetadataURL(for: rootURL)
+        guard let data = try? JSONEncoder().encode(metadata) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func populateScannedFields(_ project: inout ProjectReference, rootURL: URL) {
+        project.displayName = rootURL.lastPathComponent
+
+        let scanResult = ProjectScanner.scan(rootURL: rootURL)
+
+        if let latestALS = scanResult.alsFiles.last {
+            let stem = latestALS.deletingPathExtension().lastPathComponent
+            if let version = VersionService.parseVersion(fromStem: stem) {
+                project.latestVersionString = version.map(String.init).joined(separator: ".")
+            }
+            project.latestALSModDate = (try? latestALS.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        }
+        project.latestBounceFilename = scanResult.bounceFiles.last?.lastPathComponent
+        project.albumArtFilename = scanResult.albumArtURL?.lastPathComponent
+        project.hasMastersFolder = scanResult.hasMastersFolder
+        project.masterFilenames = scanResult.masterFiles.map(\.lastPathComponent)
+
+        if let meta = loadSongMetadata(from: rootURL) {
+            project.selectedMasterFilename = meta.selectedMasterFilename
+        }
+
+        if let art = ProjectScanner.loadAlbumArt(from: scanResult.albumArtURL) {
+            albumArtCache[project.id] = art
+        }
     }
 
     // MARK: - Persistence
 
     func load() {
         guard FileManager.default.fileExists(atPath: storageURL.path(percentEncoded: false)),
-              let data = try? Data(contentsOf: storageURL),
-              let decoded = try? JSONDecoder().decode([ProjectReference].self, from: data)
+              let data = try? Data(contentsOf: storageURL)
         else { return }
-        projects = decoded
-        for i in projects.indices {
-            rescanProject(at: i)
+
+        if let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
+            projects = registry.entries.map { entry in
+                ProjectReference(id: entry.id, displayName: "", rootBookmark: entry.rootBookmark)
+            }
+            for i in projects.indices {
+                rescanProject(at: i)
+            }
+            return
+        }
+
+        if let legacy = try? JSONDecoder().decode([ProjectReference].self, from: data) {
+            projects = legacy
+            for i in projects.indices {
+                migrateAndRescan(at: i)
+            }
+            saveRegistry()
         }
     }
 
+    private func migrateAndRescan(at index: Int) {
+        let project = projects[index]
+        guard let url = resolveBookmark(for: project) else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        if project.selectedMasterFilename != nil {
+            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename)
+            saveSongMetadata(meta, to: url)
+        }
+
+        populateScannedFields(&projects[index], rootURL: url)
+    }
+
     func save() {
-        guard let data = try? JSONEncoder().encode(projects) else { return }
+        saveRegistry()
+        for project in projects {
+            guard let url = resolveBookmark(for: project) else { continue }
+            guard url.startAccessingSecurityScopedResource() else { continue }
+            defer { url.stopAccessingSecurityScopedResource() }
+
+            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename)
+            saveSongMetadata(meta, to: url)
+        }
+    }
+
+    private func saveRegistry() {
+        let entries = projects.map { ProjectRegistry.Entry(id: $0.id, rootBookmark: $0.rootBookmark) }
+        let registry = ProjectRegistry(entries: entries)
+        guard let data = try? JSONEncoder().encode(registry) else { return }
         try? data.write(to: storageURL, options: .atomic)
     }
 
@@ -59,23 +176,10 @@ final class ProjectStore {
         let name = url.lastPathComponent
         var project = ProjectReference(displayName: name, rootBookmark: bookmark)
 
-        // Scan immediately
         if url.startAccessingSecurityScopedResource() {
             defer { url.stopAccessingSecurityScopedResource() }
-            let scanResult = ProjectScanner.scan(rootURL: url)
-            if let latestALS = scanResult.alsFiles.last {
-                let stem = latestALS.deletingPathExtension().lastPathComponent
-                if let version = VersionService.parseVersion(fromStem: stem) {
-                    project.latestVersionString = version.map(String.init).joined(separator: ".")
-                }
-            }
-            project.latestBounceFilename = scanResult.bounceFiles.last?.lastPathComponent
-            project.albumArtFilename = scanResult.albumArtURL?.lastPathComponent
-            project.hasMastersFolder = scanResult.hasMastersFolder
-            project.masterFilenames = scanResult.masterFiles.map(\.lastPathComponent)
-            if let art = ProjectScanner.loadAlbumArt(from: scanResult.albumArtURL) {
-                albumArtCache[project.id] = art
-            }
+            populateScannedFields(&project, rootURL: url)
+            saveSongMetadata(SongMetadata(), to: url)
         }
 
         projects.append(project)
@@ -86,6 +190,10 @@ final class ProjectStore {
         projects.removeAll { $0.id == project.id }
         albumArtCache.removeValue(forKey: project.id)
         save()
+    }
+
+    func moveProject(from: IndexSet, to: Int) {
+        projects.move(fromOffsets: from, toOffset: to)
     }
 
     // MARK: - Bookmark Resolution
@@ -106,7 +214,7 @@ final class ProjectStore {
         ) {
             if let idx = projects.firstIndex(where: { $0.id == project.id }) {
                 projects[idx].rootBookmark = newBookmark
-                save()
+                saveRegistry()
             }
         }
         return url
@@ -168,7 +276,15 @@ final class ProjectStore {
     func setSelectedMaster(for project: ProjectReference, filename: String) {
         guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
         projects[idx].selectedMasterFilename = filename
-        save()
+
+        if let url = resolveBookmark(for: project) {
+            if url.startAccessingSecurityScopedResource() {
+                defer { url.stopAccessingSecurityScopedResource() }
+                let meta = SongMetadata(selectedMasterFilename: filename)
+                saveSongMetadata(meta, to: url)
+            }
+        }
+        saveRegistry()
     }
 
     func suggestedVersion(for project: ProjectReference) -> String {
@@ -188,6 +304,7 @@ final class ProjectStore {
 
         if let idx = projects.firstIndex(where: { $0.id == project.id }) {
             rescanProject(at: idx)
+            projects[idx].latestALSModDate = Date()
             save()
         }
     }
@@ -207,23 +324,6 @@ final class ProjectStore {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
 
-        projects[index].displayName = url.lastPathComponent
-
-        let scanResult = ProjectScanner.scan(rootURL: url)
-
-        if let latestALS = scanResult.alsFiles.last {
-            let stem = latestALS.deletingPathExtension().lastPathComponent
-            if let version = VersionService.parseVersion(fromStem: stem) {
-                projects[index].latestVersionString = version.map(String.init).joined(separator: ".")
-            }
-        }
-        projects[index].latestBounceFilename = scanResult.bounceFiles.last?.lastPathComponent
-        projects[index].albumArtFilename = scanResult.albumArtURL?.lastPathComponent
-        projects[index].hasMastersFolder = scanResult.hasMastersFolder
-        projects[index].masterFilenames = scanResult.masterFiles.map(\.lastPathComponent)
-
-        if let art = ProjectScanner.loadAlbumArt(from: scanResult.albumArtURL) {
-            albumArtCache[project.id] = art
-        }
+        populateScannedFields(&projects[index], rootURL: url)
     }
 }
