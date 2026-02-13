@@ -50,8 +50,12 @@ struct ContentView: View {
                             guard let provider = providers.first else { return }
                             provider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, _ in
                                 guard let url else { return }
+                                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                                try? FileManager.default.removeItem(at: tmp)
+                                try? FileManager.default.copyItem(at: url, to: tmp)
                                 DispatchQueue.main.async {
-                                    store.setAlbumArt(for: project, imageURL: url)
+                                    store.setAlbumArt(for: project, imageURL: tmp)
+                                    try? FileManager.default.removeItem(at: tmp)
                                 }
                             }
                         }
