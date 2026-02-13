@@ -26,7 +26,7 @@ struct ProjectCardView: View {
                         .aspectRatio(1, contentMode: .fill)
                 } else {
                     LinearGradient(
-                        colors: [.purple.opacity(0.6), .blue.opacity(0.4)],
+                        colors: gradientColors(for: project.id),
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
@@ -164,6 +164,17 @@ struct ProjectCardView: View {
             .padding(.vertical, 4)
             .frame(minWidth: 200)
         }
+    }
+
+    private func gradientColors(for id: UUID) -> [Color] {
+        var hasher = Hasher()
+        hasher.combine(id)
+        let hash = hasher.finalize()
+        let hue = Double(abs(hash) % 360) / 360.0
+        return [
+            Color(hue: hue, saturation: 0.6, brightness: 0.7),
+            Color(hue: (hue + 0.15).truncatingRemainder(dividingBy: 1.0), saturation: 0.5, brightness: 0.5)
+        ]
     }
 
     private func actionButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
