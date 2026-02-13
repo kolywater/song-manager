@@ -45,6 +45,7 @@ struct ContentView: View {
                         onShowInFinder: { store.showInFinder(for: project) },
                         onOpenProject: { store.openProject(for: project) },
                         onRemove: { store.removeProject(project) },
+                        onChangeColor: { store.changeColor(for: project) },
                         onDropAlbumArt: { providers in
                             guard let provider = providers.first else { return }
                             provider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, _ in

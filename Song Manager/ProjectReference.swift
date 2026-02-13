@@ -1,6 +1,6 @@
 import Foundation
 
-struct ProjectReference: Identifiable, Codable {
+struct ProjectReference: Identifiable, Codable, Equatable {
     let id: UUID
     var displayName: String
     var rootBookmark: Data
@@ -10,6 +10,8 @@ struct ProjectReference: Identifiable, Codable {
     var hasMastersFolder: Bool = false
     var masterFilenames: [String] = []
     var selectedMasterFilename: String?
+    var gradientHue: Double?
+    var latestALSModDate: Date?
 
     init(id: UUID = UUID(), displayName: String, rootBookmark: Data) {
         self.id = id

@@ -11,6 +11,7 @@ struct ProjectCardView: View {
     var onShowInFinder: () -> Void
     var onOpenProject: () -> Void
     var onRemove: () -> Void
+    var onChangeColor: () -> Void
     var onDropAlbumArt: ([NSItemProvider]) -> Void
 
     @State private var showingMasterPicker = false
@@ -63,6 +64,7 @@ struct ProjectCardView: View {
                     HStack {
                         Spacer()
                         Menu {
+                            Button("Change Color", action: onChangeColor)
                             Button("Remove Song", role: .destructive, action: onRemove)
                         } label: {
                             Image(systemName: "ellipsis")
@@ -167,9 +169,14 @@ struct ProjectCardView: View {
     }
 
     private func gradientColors(for id: UUID) -> [Color] {
-        let uuid = id.uuid
-        let byte = Int(uuid.0) &+ Int(uuid.6) &* 7
-        let hue = Double(byte % 256) / 256.0
+        let hue: Double
+        if let stored = project.gradientHue {
+            hue = stored
+        } else {
+            let uuid = id.uuid
+            let byte = Int(uuid.0) &+ Int(uuid.6) &* 7
+            hue = Double(byte % 256) / 256.0
+        }
         return [
             Color(hue: hue, saturation: 0.6, brightness: 0.7),
             Color(hue: (hue + 0.15).truncatingRemainder(dividingBy: 1.0), saturation: 0.5, brightness: 0.5)

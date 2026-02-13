@@ -87,6 +87,7 @@ final class ProjectStore {
 
         if let meta = loadSongMetadata(from: rootURL) {
             project.selectedMasterFilename = meta.selectedMasterFilename
+            project.gradientHue = meta.gradientHue
         }
 
         if let art = ProjectScanner.loadAlbumArt(from: scanResult.albumArtURL) {
@@ -127,7 +128,7 @@ final class ProjectStore {
         defer { url.stopAccessingSecurityScopedResource() }
 
         if project.selectedMasterFilename != nil {
-            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename)
+            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename, gradientHue: project.gradientHue)
             saveSongMetadata(meta, to: url)
         }
 
@@ -141,7 +142,7 @@ final class ProjectStore {
             guard url.startAccessingSecurityScopedResource() else { continue }
             defer { url.stopAccessingSecurityScopedResource() }
 
-            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename)
+            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename, gradientHue: project.gradientHue)
             saveSongMetadata(meta, to: url)
         }
     }
@@ -280,11 +281,17 @@ final class ProjectStore {
         if let url = resolveBookmark(for: project) {
             if url.startAccessingSecurityScopedResource() {
                 defer { url.stopAccessingSecurityScopedResource() }
-                let meta = SongMetadata(selectedMasterFilename: filename)
+                let meta = SongMetadata(selectedMasterFilename: filename, gradientHue: projects[idx].gradientHue)
                 saveSongMetadata(meta, to: url)
             }
         }
         saveRegistry()
+    }
+
+    func changeColor(for project: ProjectReference) {
+        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        projects[idx].gradientHue = Double.random(in: 0..<1)
+        save()
     }
 
     func setAlbumArt(for project: ProjectReference, imageURL: URL) {
