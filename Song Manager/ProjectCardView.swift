@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProjectCardView: View {
     let project: ProjectReference
@@ -10,8 +11,10 @@ struct ProjectCardView: View {
     var onShowInFinder: () -> Void
     var onOpenProject: () -> Void
     var onRemove: () -> Void
+    var onDropAlbumArt: ([NSItemProvider]) -> Void
 
     @State private var showingMasterPicker = false
+    @State private var isDroppingImage = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,10 +73,30 @@ struct ProjectCardView: View {
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+                        .focusEffectDisabled()
                         .padding(10)
                     }
                     Spacer()
                 }
+            }
+            .overlay {
+                if isDroppingImage {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.blue.opacity(0.3))
+                        .overlay {
+                            VStack(spacing: 6) {
+                                Image(systemName: "photo.badge.plus")
+                                    .font(.system(size: 32))
+                                Text("Set Album Art")
+                                    .font(.headline)
+                            }
+                            .foregroundStyle(.white)
+                        }
+                }
+            }
+            .onDrop(of: [.image], isTargeted: $isDroppingImage) { providers in
+                onDropAlbumArt(providers)
+                return true
             }
             .clipped()
 

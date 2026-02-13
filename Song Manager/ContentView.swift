@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var store = ProjectStore()
@@ -6,6 +7,7 @@ struct ContentView: View {
     @State private var showingNewVersion = false
     @State private var newVersionText = ""
     @State private var projectForNewVersion: ProjectReference?
+    @State private var draggingProject: ProjectReference?
 
     private let columns = [
         GridItem(.adaptive(minimum: 310, maximum: 310), spacing: 16)
@@ -14,7 +16,7 @@ struct ContentView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                ForEach(store.projects) { project in
+                ForEach(store.sortedProjects) { project in
                     ProjectCardView(
                         project: project,
                         albumArt: store.albumArtCache[project.id],
@@ -42,14 +44,36 @@ struct ContentView: View {
                         },
                         onShowInFinder: { store.showInFinder(for: project) },
                         onOpenProject: { store.openProject(for: project) },
-                        onRemove: { store.removeProject(project) }
+                        onRemove: { store.removeProject(project) },
+                        onDropAlbumArt: { providers in
+                            guard let provider = providers.first else { return }
+                            provider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, _ in
+                                guard let url else { return }
+                                DispatchQueue.main.async {
+                                    store.setAlbumArt(for: project, imageURL: url)
+                                }
+                            }
+                        }
                     )
+                    .opacity(draggingProject == project ? 0 : 1)
+                    .animation(nil, value: draggingProject)
+                    .onDrag {
+                        draggingProject = project
+                        return NSItemProvider(object: project.id.uuidString as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: ProjectReorderDelegate(
+                        item: project,
+                        items: store.projects,
+                        dragging: $draggingProject,
+                        store: store
+                    ))
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
             .padding(.bottom, player.currentURL != nil ? 70 : 20)
         }
+        .onDrop(of: [.text], delegate: DropOutsideDelegate(dragging: $draggingProject, store: store))
         .overlay(alignment: .bottom) {
             if player.currentURL != nil {
                 PlayerBarView(player: player)
@@ -79,6 +103,21 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 4) {
+                    Menu {
+                        ForEach(SortMode.allCases, id: \.self) { mode in
+                            Button {
+                                store.sortMode = mode
+                            } label: {
+                                if store.sortMode == mode {
+                                    Label(mode.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
                     Button(action: { store.refresh() }) {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -91,6 +130,10 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: store.sortMode) {
+            UserDefaults.standard.set(store.sortMode.rawValue, forKey: "sortMode")
+        }
+        .animation(.easeInOut(duration: 0.3), value: store.sortedProjects.map(\.id))
         .alert("New Version", isPresented: $showingNewVersion) {
             TextField("Version", text: $newVersionText)
             Button("Cancel", role: .cancel) {}
@@ -104,6 +147,48 @@ struct ContentView: View {
                 Text("Current version: \(current)")
             }
         }
+    }
+}
+
+struct ProjectReorderDelegate: DropDelegate {
+    let item: ProjectReference
+    let items: [ProjectReference]
+    @Binding var dragging: ProjectReference?
+    let store: ProjectStore
+
+    func dropEntered(info: DropInfo) {
+        guard store.sortMode == .custom,
+              let current = dragging, item != current,
+              let from = items.firstIndex(of: current),
+              let to = items.firstIndex(of: item) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            store.moveProject(from: IndexSet(integer: from), to: to > from ? to + 1 : to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: store.sortMode == .custom ? .move : .cancel)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        store.save()
+        return true
+    }
+}
+
+struct DropOutsideDelegate: DropDelegate {
+    @Binding var dragging: ProjectReference?
+    let store: ProjectStore
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        store.save()
+        return true
     }
 }
 

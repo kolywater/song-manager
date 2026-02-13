@@ -287,6 +287,22 @@ final class ProjectStore {
         saveRegistry()
     }
 
+    func setAlbumArt(for project: ProjectReference, imageURL: URL) {
+        guard let url = resolveBookmark(for: project) else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        let artFolder = url.appending(path: "_ALBUM ART")
+        try? FileManager.default.createDirectory(at: artFolder, withIntermediateDirectories: true)
+
+        let dest = artFolder.appending(path: imageURL.lastPathComponent)
+        try? FileManager.default.copyItem(at: imageURL, to: dest)
+
+        if let idx = projects.firstIndex(where: { $0.id == project.id }) {
+            rescanProject(at: idx)
+        }
+    }
+
     func suggestedVersion(for project: ProjectReference) -> String {
         guard let version = project.latestVersionString,
               let parts = VersionService.parseVersion(fromStem: "x \(version)") else {
