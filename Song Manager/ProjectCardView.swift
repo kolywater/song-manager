@@ -16,7 +16,7 @@ struct ProjectCardView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Album art / title area
-            ZStack(alignment: .bottomLeading) {
+            ZStack {
                 if let albumArt {
                     Image(nsImage: albumArt)
                         .resizable()
@@ -30,7 +30,6 @@ struct ProjectCardView: View {
                     .aspectRatio(1, contentMode: .fill)
                 }
 
-                // Dark gradient fade at bottom
                 VStack(alignment: .leading, spacing: 4) {
                     Spacer()
                     LinearGradient(
@@ -55,6 +54,26 @@ struct ProjectCardView: View {
                         .padding(.bottom, 14)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack {
+                    HStack {
+                        Spacer()
+                        Menu {
+                            Button("Remove Song", role: .destructive, action: onRemove)
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 28, height: 28)
+                                .background(.black.opacity(0.4))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(10)
+                    }
+                    Spacer()
+                }
             }
             .clipped()
 
@@ -73,9 +92,6 @@ struct ProjectCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
-        .contextMenu {
-            Button("Remove Project", role: .destructive, action: onRemove)
-        }
     }
 
     private var listenButton: some View {
