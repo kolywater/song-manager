@@ -167,10 +167,9 @@ struct ProjectCardView: View {
     }
 
     private func gradientColors(for id: UUID) -> [Color] {
-        var hasher = Hasher()
-        hasher.combine(id)
-        let hash = hasher.finalize()
-        let hue = Double(abs(hash) % 360) / 360.0
+        let uuid = id.uuid
+        let byte = Int(uuid.0) &+ Int(uuid.6) &* 7
+        let hue = Double(byte % 256) / 256.0
         return [
             Color(hue: hue, saturation: 0.6, brightness: 0.7),
             Color(hue: (hue + 0.15).truncatingRemainder(dividingBy: 1.0), saturation: 0.5, brightness: 0.5)
