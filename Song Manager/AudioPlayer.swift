@@ -9,6 +9,7 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     var currentURL: URL?
     var trackName: String = ""
     var bounceFiles: [URL] = []
+    var isLooping = false
     var errorMessage: String?
 
     private var avPlayer: AVAudioPlayer?
@@ -118,9 +119,15 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         MainActor.assumeIsolated {
-            isPlaying = false
-            currentTime = 0
-            stopTimer()
+            if isLooping {
+                player.currentTime = 0
+                player.play()
+                currentTime = 0
+            } else {
+                isPlaying = false
+                currentTime = 0
+                stopTimer()
+            }
         }
     }
 }

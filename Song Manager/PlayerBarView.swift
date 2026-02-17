@@ -77,6 +77,15 @@ struct PlayerBarView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .trailing)
 
+            Button(action: { player.isLooping.toggle() }) {
+                Image(systemName: "repeat")
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+                    .foregroundStyle(player.isLooping ? .primary : .secondary)
+            }
+            .buttonStyle(.plain)
+
             Button(action: { player.stop() }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .medium))
