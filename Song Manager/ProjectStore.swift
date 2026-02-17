@@ -160,30 +160,29 @@ final class ProjectStore {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select an Ableton Live project folder"
+        panel.allowsMultipleSelection = true
+        panel.message = "Select Ableton Live project folders"
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK else { return }
 
-        guard let bookmark = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) else {
-            errorMessage = "Failed to create bookmark for folder"
-            return
+        for url in panel.urls {
+            guard let bookmark = try? url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            ) else { continue }
+
+            let name = url.lastPathComponent
+            var project = ProjectReference(displayName: name, rootBookmark: bookmark)
+
+            if url.startAccessingSecurityScopedResource() {
+                defer { url.stopAccessingSecurityScopedResource() }
+                populateScannedFields(&project, rootURL: url)
+                saveSongMetadata(SongMetadata(), to: url)
+            }
+
+            projects.append(project)
         }
-
-        let name = url.lastPathComponent
-        var project = ProjectReference(displayName: name, rootBookmark: bookmark)
-
-        if url.startAccessingSecurityScopedResource() {
-            defer { url.stopAccessingSecurityScopedResource() }
-            populateScannedFields(&project, rootURL: url)
-            saveSongMetadata(SongMetadata(), to: url)
-        }
-
-        projects.append(project)
         save()
     }
 
