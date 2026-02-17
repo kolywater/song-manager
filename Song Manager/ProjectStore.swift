@@ -161,46 +161,29 @@ final class ProjectStore {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "Select a project folder, or a folder containing multiple projects"
+        panel.message = "Select an Ableton Live project folder"
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
 
-        let foldersToAdd: [URL]
-        let hasALSFiles = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil))?.contains { $0.pathExtension.lowercased() == "als" } ?? false
-
-        if hasALSFiles {
-            foldersToAdd = [url]
-        } else {
-            let contents = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)) ?? []
-            foldersToAdd = contents.filter { child in
-                let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                guard isDir else { return false }
-                let childContents = (try? FileManager.default.contentsOfDirectory(at: child, includingPropertiesForKeys: nil)) ?? []
-                return childContents.contains { $0.pathExtension.lowercased() == "als" }
-            }
-            if foldersToAdd.isEmpty {
-                errorMessage = "No Ableton projects found in that folder"
-                return
-            }
+        guard let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else {
+            errorMessage = "Failed to create bookmark for folder"
+            return
         }
 
-        let existingIDs = Set(projects.compactMap { resolveBookmark(for: $0)?.absoluteString })
-        for folder in foldersToAdd {
-            if existingIDs.contains(folder.absoluteString) { continue }
+        let name = url.lastPathComponent
+        var project = ProjectReference(displayName: name, rootBookmark: bookmark)
 
-            guard let bookmark = try? folder.bookmarkData(
-                options: .withSecurityScope,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            ) else { continue }
-
-            var project = ProjectReference(displayName: folder.lastPathComponent, rootBookmark: bookmark)
-            populateScannedFields(&project, rootURL: folder)
-            saveSongMetadata(SongMetadata(), to: folder)
-            projects.append(project)
+        if url.startAccessingSecurityScopedResource() {
+            defer { url.stopAccessingSecurityScopedResource() }
+            populateScannedFields(&project, rootURL: url)
+            saveSongMetadata(SongMetadata(), to: url)
         }
+
+        projects.append(project)
         save()
     }
 
