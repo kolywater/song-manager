@@ -105,7 +105,7 @@ export platform=_default_platform configuration=_default_configuration: (build p
     dstroot="{{_build_root}}/{{platform}}-{{configuration}}"
     app_name="$scheme.app"
     app_path="$dstroot/Applications/$app_name"
-    export_path="./build/$app_name"
+    export_path="$HOME/Library/CloudStorage/Dropbox/music/aidenel songs/$app_name"
 
     if [[ ! -d "$app_path" ]]; then
         echo "Error: $app_name not found at $app_path"
@@ -113,12 +113,13 @@ export platform=_default_platform configuration=_default_configuration: (build p
     fi
 
     echo ""
-    echo "Copying $app_name to project root..."
+    echo "Copying $app_name to $(dirname "$export_path")..."
+    mkdir -p "$(dirname "$export_path")"
     rm -rf "$export_path"
     cp -R "$app_path" "$export_path"
 
     echo "Exported:"
-    echo "  $PWD/$app_name"
+    echo "  $export_path"
 
 # Run app and stream logs in tmux
 [group('build')]
@@ -132,7 +133,7 @@ run:
     log_file="{{debug_log}}"
     session_name="{{_project}}-logs"
 
-    app_path="./build/$app_name"
+    app_path="$HOME/Library/CloudStorage/Dropbox/music/aidenel songs/$app_name"
 
     if [[ ! -d "$app_path" ]]; then
         echo "Error: $app_name not found"
