@@ -39,7 +39,7 @@ struct NoteEditorView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
         let dateStr = formatter.string(from: Date())
-        let snippet = "\(dateStr)\n---\n"
+        let snippet = "\(dateStr)\n——————————————————\n"
 
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
             text.insert(contentsOf: snippet, at: text.startIndex)
