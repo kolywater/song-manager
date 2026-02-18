@@ -160,8 +160,8 @@ struct ContentView: View {
                 Text("Current version: \(current)")
             }
         }
-        .sheet(isPresented: $showingNotes) {
-            if let project = projectForNotes {
+        .overlay {
+            if showingNotes, let project = projectForNotes {
                 NoteEditorView(
                     songName: project.displayName,
                     text: $notesText,
@@ -171,8 +171,11 @@ struct ContentView: View {
                         showingNotes = false
                     }
                 )
+                .background(.regularMaterial)
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: showingNotes)
     }
 }
 

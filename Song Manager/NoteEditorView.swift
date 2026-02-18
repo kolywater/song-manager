@@ -26,7 +26,7 @@ struct NoteEditorView: View {
                 .scrollContentBackground(.hidden)
                 .padding(8)
         }
-        .frame(width: 700, height: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onReceive(Timer.publish(every: autoSaveInterval, on: .main, in: .common).autoconnect()) { _ in
             onSave()
         }
