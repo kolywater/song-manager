@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import SwiftUI
 
@@ -15,6 +16,7 @@ struct NoteEditorView: View {
                 Text(songName)
                     .font(.headline)
                 Spacer()
+                Button("Add Date") { insertDate() }
                 Button("Close") { onDismiss() }
             }
             .padding()
@@ -31,5 +33,21 @@ struct NoteEditorView: View {
             onSave()
         }
         .onDisappear { onSave() }
+    }
+
+    private func insertDate() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        let dateStr = formatter.string(from: Date())
+        let snippet = "\(dateStr)\n---\n"
+
+        guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
+            text.append(snippet)
+            return
+        }
+
+        let range = textView.selectedRange()
+        textView.insertText(snippet, replacementRange: range)
+        text = textView.string
     }
 }
