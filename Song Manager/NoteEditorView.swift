@@ -115,6 +115,9 @@ class CheckboxNSTextView: NSTextView {
         let text = string as NSString
         let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
         let line = text.substring(with: lineRange)
+        let offsetInLine = charIndex - lineRange.location
+
+        guard offsetInLine < 5 else { return false }
 
         if line.hasPrefix("- [ ] ") {
             let checkboxRange = NSRange(location: lineRange.location + 2, length: 3)
