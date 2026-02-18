@@ -171,7 +171,8 @@ struct ContentView: View {
                         showingNotes = false
                     }
                 )
-                .background(.regularMaterial)
+                .padding(24)
+                .background(Color(.windowBackgroundColor))
                 .transition(.opacity)
             }
         }
