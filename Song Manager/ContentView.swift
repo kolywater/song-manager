@@ -171,8 +171,10 @@ struct ContentView: View {
                         showingNotes = false
                     }
                 )
-                .padding(24)
                 .background(Color(.windowBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
+                .padding(32)
                 .transition(.opacity)
             }
         }
