@@ -8,6 +8,7 @@ struct ProjectCardView: View {
     var onListen: () -> Void
     var onSelectMaster: (String) -> Void
     var onNewVersion: () -> Void
+    var onNotes: () -> Void
     var onShowInFinder: () -> Void
     var onOpenProject: () -> Void
     var onRemove: () -> Void
@@ -109,6 +110,8 @@ struct ProjectCardView: View {
                 listenButton
                 Divider().frame(height: 28)
                 actionButton(icon: "square.fill.text.grid.1x2", label: "Open", action: onOpenProject)
+                Divider().frame(height: 28)
+                actionButton(icon: "note.text", label: "Notes", action: onNotes)
                 Divider().frame(height: 28)
                 actionButton(icon: "plus.square.on.square", label: "New Ver.", action: onNewVersion)
             }

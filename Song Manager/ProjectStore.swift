@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 
 private let songMetadataFilename = "SongManagerData.json"
+private let notesFilename = "_NOTES.md"
 
 enum SortMode: String, CaseIterable {
     case custom = "Custom"
@@ -292,6 +293,22 @@ final class ProjectStore {
         guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
         projects[idx].gradientHue = Double.random(in: 0..<1)
         save()
+    }
+
+    func loadNotes(for project: ProjectReference) -> String {
+        guard let url = resolveBookmark(for: project) else { return "" }
+        guard url.startAccessingSecurityScopedResource() else { return "" }
+        defer { url.stopAccessingSecurityScopedResource() }
+        let notesURL = url.appending(path: notesFilename)
+        return (try? String(contentsOf: notesURL, encoding: .utf8)) ?? ""
+    }
+
+    func saveNotes(for project: ProjectReference, text: String) {
+        guard let url = resolveBookmark(for: project) else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+        let notesURL = url.appending(path: notesFilename)
+        try? text.write(to: notesURL, atomically: true, encoding: .utf8)
     }
 
     func setAlbumArt(for project: ProjectReference, imageURL: URL) {

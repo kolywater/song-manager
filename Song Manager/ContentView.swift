@@ -8,6 +8,9 @@ struct ContentView: View {
     @State private var newVersionText = ""
     @State private var projectForNewVersion: ProjectReference?
     @State private var draggingProject: ProjectReference?
+    @State private var showingNotes = false
+    @State private var notesText = ""
+    @State private var projectForNotes: ProjectReference?
 
     private let columns = [
         GridItem(.adaptive(minimum: 310, maximum: 310), spacing: 16)
@@ -41,6 +44,11 @@ struct ContentView: View {
                             projectForNewVersion = project
                             newVersionText = store.suggestedVersion(for: project)
                             showingNewVersion = true
+                        },
+                        onNotes: {
+                            projectForNotes = project
+                            notesText = store.loadNotes(for: project)
+                            showingNotes = true
                         },
                         onShowInFinder: { store.showInFinder(for: project) },
                         onOpenProject: { store.openProject(for: project) },
@@ -150,6 +158,19 @@ struct ContentView: View {
         } message: {
             if let project = projectForNewVersion, let current = project.latestVersionString {
                 Text("Current version: \(current)")
+            }
+        }
+        .sheet(isPresented: $showingNotes) {
+            if let project = projectForNotes {
+                NoteEditorView(
+                    songName: project.displayName,
+                    text: $notesText,
+                    onSave: { store.saveNotes(for: project, text: notesText) },
+                    onDismiss: {
+                        store.saveNotes(for: project, text: notesText)
+                        showingNotes = false
+                    }
+                )
             }
         }
     }
