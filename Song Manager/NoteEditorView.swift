@@ -73,6 +73,7 @@ struct CheckboxTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
 
         context.coordinator.textView = textView
+        textView.applyFormatting()
         return scrollView
     }
 
@@ -82,6 +83,7 @@ struct CheckboxTextEditor: NSViewRepresentable {
             let selectedRanges = textView.selectedRanges
             textView.string = text
             textView.selectedRanges = selectedRanges
+            (textView as? CheckboxNSTextView)?.applyFormatting()
         }
     }
 
@@ -101,6 +103,58 @@ struct CheckboxTextEditor: NSViewRepresentable {
 }
 
 class CheckboxNSTextView: NSTextView {
+    private let regularFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    private let boldFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .bold)
+
+    override func didChangeText() {
+        super.didChangeText()
+        applyFormatting()
+    }
+
+    func applyFormatting() {
+        guard let textStorage = textStorage else { return }
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+
+        textStorage.beginEditing()
+        textStorage.addAttribute(.font, value: regularFont, range: fullRange)
+        textStorage.removeAttribute(.foregroundColor, range: fullRange)
+
+        let pattern = try! NSRegularExpression(pattern: "\\*\\*(.+?)\\*\\*")
+        for match in pattern.matches(in: textStorage.string, range: fullRange) {
+            textStorage.addAttribute(.font, value: boldFont, range: match.range(at: 1))
+            let markerStart = NSRange(location: match.range.location, length: 2)
+            let markerEnd = NSRange(location: match.range.location + match.range.length - 2, length: 2)
+            textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: markerStart)
+            textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: markerEnd)
+        }
+        textStorage.endEditing()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "b" {
+            toggleBold()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func toggleBold() {
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        let selected = (string as NSString).substring(with: range)
+
+        if selected.hasPrefix("**") && selected.hasSuffix("**") && selected.count > 4 {
+            let inner = String(selected.dropFirst(2).dropLast(2))
+            replaceCharacters(in: range, with: inner)
+            setSelectedRange(NSRange(location: range.location, length: inner.count))
+        } else {
+            let bolded = "**\(selected)**"
+            replaceCharacters(in: range, with: bolded)
+            setSelectedRange(NSRange(location: range.location + 2, length: selected.count))
+        }
+        delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let charIndex = characterIndexForInsertion(at: point)
