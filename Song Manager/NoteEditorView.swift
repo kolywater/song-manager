@@ -47,6 +47,9 @@ struct NoteEditorView: View {
 struct CheckboxTextEditor: NSViewRepresentable {
     @Binding var text: String
 
+    static let regularFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    static let boldFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .bold)
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -55,9 +58,8 @@ struct CheckboxTextEditor: NSViewRepresentable {
         let scrollView = NSScrollView()
         let textView = CheckboxNSTextView()
         textView.delegate = context.coordinator
-        textView.isRichText = false
+        textView.isRichText = true
         textView.allowsUndo = true
-        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.isEditable = true
         textView.isSelectable = true
         textView.isVerticallyResizable = true
@@ -66,68 +68,89 @@ struct CheckboxTextEditor: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 4, height: 4)
         textView.textContainer?.widthTracksTextView = true
         textView.drawsBackground = false
-        textView.string = text
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+
+        textView.textStorage?.setAttributedString(markdownToAttributedString(text))
+        context.coordinator.lastSyncedMarkdown = text
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
 
         context.coordinator.textView = textView
-        textView.applyFormatting()
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
-        if textView.string != text {
+        guard let textView = scrollView.documentView as? CheckboxNSTextView else { return }
+        if text != context.coordinator.lastSyncedMarkdown {
             let selectedRanges = textView.selectedRanges
-            textView.string = text
+            textView.textStorage?.setAttributedString(markdownToAttributedString(text))
             textView.selectedRanges = selectedRanges
-            (textView as? CheckboxNSTextView)?.applyFormatting()
+            context.coordinator.lastSyncedMarkdown = text
         }
+    }
+
+    func markdownToAttributedString(_ markdown: String) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let pattern = try! NSRegularExpression(pattern: "\\*\\*(.+?)\\*\\*")
+        let nsString = markdown as NSString
+        var lastEnd = 0
+
+        for match in pattern.matches(in: markdown, range: NSRange(location: 0, length: nsString.length)) {
+            if match.range.location > lastEnd {
+                let before = nsString.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
+                result.append(NSAttributedString(string: before, attributes: [.font: Self.regularFont]))
+            }
+            let inner = nsString.substring(with: match.range(at: 1))
+            result.append(NSAttributedString(string: inner, attributes: [.font: Self.boldFont]))
+            lastEnd = match.range.location + match.range.length
+        }
+
+        if lastEnd < nsString.length {
+            let remaining = nsString.substring(with: NSRange(location: lastEnd, length: nsString.length - lastEnd))
+            result.append(NSAttributedString(string: remaining, attributes: [.font: Self.regularFont]))
+        }
+
+        return result
+    }
+
+    static func attributedStringToMarkdown(_ attrString: NSAttributedString) -> String {
+        var result = ""
+        attrString.enumerateAttribute(.font, in: NSRange(location: 0, length: attrString.length)) { value, range, _ in
+            let text = (attrString.string as NSString).substring(with: range)
+            if let font = value as? NSFont, font.fontDescriptor.symbolicTraits.contains(.bold) {
+                result += "**\(text)**"
+            } else {
+                result += text
+            }
+        }
+        return result
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CheckboxTextEditor
         weak var textView: NSTextView?
+        var lastSyncedMarkdown: String = ""
 
         init(_ parent: CheckboxTextEditor) {
             self.parent = parent
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
+            guard let textView = notification.object as? NSTextView,
+                  let textStorage = textView.textStorage else { return }
+            let markdown = CheckboxTextEditor.attributedStringToMarkdown(textStorage)
+            lastSyncedMarkdown = markdown
+            parent.text = markdown
         }
     }
 }
 
 class CheckboxNSTextView: NSTextView {
-    private let regularFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-    private let boldFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .bold)
-
-    override func didChangeText() {
-        super.didChangeText()
-        applyFormatting()
-    }
-
-    func applyFormatting() {
-        guard let textStorage = textStorage else { return }
-        let fullRange = NSRange(location: 0, length: textStorage.length)
-
-        textStorage.beginEditing()
-        textStorage.addAttribute(.font, value: regularFont, range: fullRange)
-        textStorage.removeAttribute(.foregroundColor, range: fullRange)
-
-        let pattern = try! NSRegularExpression(pattern: "\\*\\*(.+?)\\*\\*")
-        for match in pattern.matches(in: textStorage.string, range: fullRange) {
-            textStorage.addAttribute(.font, value: boldFont, range: match.range(at: 1))
-            let markerStart = NSRange(location: match.range.location, length: 2)
-            let markerEnd = NSRange(location: match.range.location + match.range.length - 2, length: 2)
-            textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: markerStart)
-            textStorage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: markerEnd)
-        }
-        textStorage.endEditing()
+    override func paste(_ sender: Any?) {
+        pasteAsPlainText(sender)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -141,17 +164,17 @@ class CheckboxNSTextView: NSTextView {
     private func toggleBold() {
         let range = selectedRange()
         guard range.length > 0 else { return }
-        let selected = (string as NSString).substring(with: range)
 
-        if selected.hasPrefix("**") && selected.hasSuffix("**") && selected.count > 4 {
-            let inner = String(selected.dropFirst(2).dropLast(2))
-            replaceCharacters(in: range, with: inner)
-            setSelectedRange(NSRange(location: range.location, length: inner.count))
-        } else {
-            let bolded = "**\(selected)**"
-            replaceCharacters(in: range, with: bolded)
-            setSelectedRange(NSRange(location: range.location + 2, length: selected.count))
+        var allBold = true
+        textStorage?.enumerateAttribute(.font, in: range) { value, _, stop in
+            if let font = value as? NSFont, !font.fontDescriptor.symbolicTraits.contains(.bold) {
+                allBold = false
+                stop.pointee = true
+            }
         }
+
+        let newFont = allBold ? CheckboxTextEditor.regularFont : CheckboxTextEditor.boldFont
+        textStorage?.addAttribute(.font, value: newFont, range: range)
         delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
     }
 
