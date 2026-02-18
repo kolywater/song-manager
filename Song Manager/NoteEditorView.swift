@@ -1,10 +1,6 @@
 import Combine
 import SwiftUI
-
-struct NoteLine: Identifiable, Equatable {
-    let id = UUID()
-    var text: String
-}
+import AppKit
 
 struct NoteEditorView: View {
     let songName: String
@@ -12,8 +8,6 @@ struct NoteEditorView: View {
     var onSave: () -> Void
     var onDismiss: () -> Void
 
-    @State private var lines: [NoteLine] = []
-    @FocusState private var focusedLineID: UUID?
     private let autoSaveInterval: TimeInterval = 3
 
     var body: some View {
@@ -22,7 +16,9 @@ struct NoteEditorView: View {
                 Text(songName)
                     .font(.headline)
                 Spacer()
-                Button("Add Task") { insertTask() }
+                Button("Add Task") {
+                    text.insert(contentsOf: "- [ ] \n", at: text.startIndex)
+                }
                 Button("Add Date") { insertDate() }
                 Button("Close") { onDismiss() }
             }
@@ -30,127 +26,107 @@ struct NoteEditorView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach($lines) { $line in
-                        NoteLineView(
-                            line: $line,
-                            isFocused: focusedLineID == line.id,
-                            onFocus: { focusedLineID = line.id },
-                            onSubmit: { insertLineAfter(line.id) },
-                            onDelete: { deleteLineIfEmpty(line.id) }
-                        )
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onTapGesture {
-                if lines.isEmpty || !lines.last!.text.isEmpty {
-                    lines.append(NoteLine(text: ""))
-                }
-                focusedLineID = lines.last?.id
-            }
+            CheckboxTextEditor(text: $text)
+                .padding(8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { lines = text.components(separatedBy: "\n").map { NoteLine(text: $0) } }
-        .onChange(of: lines) { syncText() }
         .onReceive(Timer.publish(every: autoSaveInterval, on: .main, in: .common).autoconnect()) { _ in
             onSave()
         }
         .onDisappear { onSave() }
     }
 
-    private func syncText() {
-        text = lines.map(\.text).joined(separator: "\n")
-    }
-
-    private func insertLineAfter(_ id: UUID) {
-        guard let idx = lines.firstIndex(where: { $0.id == id }) else { return }
-        let newLine = NoteLine(text: "")
-        lines.insert(newLine, at: idx + 1)
-        focusedLineID = newLine.id
-    }
-
-    private func deleteLineIfEmpty(_ id: UUID) {
-        guard let idx = lines.firstIndex(where: { $0.id == id }),
-              lines[idx].text.isEmpty, lines.count > 1 else { return }
-        lines.remove(at: idx)
-        let prevIdx = max(idx - 1, 0)
-        focusedLineID = lines[prevIdx].id
-    }
-
     private func insertDate() {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, yyyy"
-        let dateLines = [
-            NoteLine(text: formatter.string(from: Date())),
-            NoteLine(text: "——————————————————")
-        ]
-        lines.insert(contentsOf: dateLines, at: 0)
-    }
-
-    private func insertTask() {
-        let newLine = NoteLine(text: "- [ ] ")
-        lines.insert(newLine, at: 0)
-        focusedLineID = newLine.id
+        let snippet = "\(formatter.string(from: Date()))\n——————————————————\n"
+        text.insert(contentsOf: snippet, at: text.startIndex)
     }
 }
 
-struct NoteLineView: View {
-    @Binding var line: NoteLine
-    let isFocused: Bool
-    var onFocus: () -> Void
-    var onSubmit: () -> Void
-    var onDelete: () -> Void
+struct CheckboxTextEditor: NSViewRepresentable {
+    @Binding var text: String
 
-    var body: some View {
-        if let match = parseCheckbox(line.text) {
-            HStack(alignment: .center, spacing: 6) {
-                Toggle("", isOn: Binding(
-                    get: { match.checked },
-                    set: { newVal in
-                        line.text = "- [\(newVal ? "x" : " ")] \(match.content)"
-                    }
-                ))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
 
-                TextField("", text: Binding(
-                    get: { match.content },
-                    set: { newVal in
-                        let check = parseCheckbox(line.text)?.checked ?? false
-                        line.text = "- [\(check ? "x" : " ")] \(newVal)"
-                    }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(.body, design: .monospaced))
-                .strikethrough(match.checked)
-                .foregroundStyle(match.checked ? .secondary : .primary)
-                .onTapGesture { onFocus() }
-                .onSubmit { onSubmit() }
-                .onChange(of: line.text) {
-                    if line.text.isEmpty { onDelete() }
-                }
-            }
-        } else {
-            TextField("", text: $line.text)
-                .textFieldStyle(.plain)
-                .font(.system(.body, design: .monospaced))
-                .onTapGesture { onFocus() }
-                .onSubmit { onSubmit() }
-                .onChange(of: line.text) {
-                    if line.text.isEmpty { onDelete() }
-                }
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        let textView = CheckboxNSTextView()
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 4, height: 4)
+        textView.textContainer?.widthTracksTextView = true
+        textView.drawsBackground = false
+        textView.string = text
+
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+
+        context.coordinator.textView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        if textView.string != text {
+            let selectedRanges = textView.selectedRanges
+            textView.string = text
+            textView.selectedRanges = selectedRanges
         }
     }
 
-    private func parseCheckbox(_ text: String) -> (checked: Bool, content: String)? {
-        if text.hasPrefix("- [x] ") {
-            return (true, String(text.dropFirst(6)))
-        } else if text.hasPrefix("- [ ] ") {
-            return (false, String(text.dropFirst(6)))
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: CheckboxTextEditor
+        weak var textView: NSTextView?
+
+        init(_ parent: CheckboxTextEditor) {
+            self.parent = parent
         }
-        return nil
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+class CheckboxNSTextView: NSTextView {
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let charIndex = characterIndexForInsertion(at: point)
+
+        if toggleCheckbox(at: charIndex) {
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    private func toggleCheckbox(at charIndex: Int) -> Bool {
+        let text = string as NSString
+        let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
+        let line = text.substring(with: lineRange)
+
+        if line.hasPrefix("- [ ] ") {
+            let checkboxRange = NSRange(location: lineRange.location + 2, length: 3)
+            replaceCharacters(in: checkboxRange, with: "[x]")
+            delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+            return true
+        } else if line.hasPrefix("- [x] ") {
+            let checkboxRange = NSRange(location: lineRange.location + 2, length: 3)
+            replaceCharacters(in: checkboxRange, with: "[ ]")
+            delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+            return true
+        }
+        return false
     }
 }
