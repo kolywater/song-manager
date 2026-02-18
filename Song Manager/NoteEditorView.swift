@@ -16,7 +16,6 @@ struct NoteEditorView: View {
                     .font(.headline)
                 Spacer()
                 Button("Close") { onDismiss() }
-                    .keyboardShortcut(.escape, modifiers: [])
             }
             .padding()
 
@@ -27,7 +26,7 @@ struct NoteEditorView: View {
                 .scrollContentBackground(.hidden)
                 .padding(8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .presentationSizing(.page)
         .onReceive(Timer.publish(every: autoSaveInterval, on: .main, in: .common).autoconnect()) { _ in
             onSave()
         }
