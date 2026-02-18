@@ -42,7 +42,7 @@ struct NoteEditorView: View {
         let snippet = "\(dateStr)\n---\n"
 
         guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView else {
-            text.append(snippet)
+            text.insert(contentsOf: snippet, at: text.startIndex)
             return
         }
 
