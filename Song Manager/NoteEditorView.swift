@@ -17,7 +17,7 @@ struct NoteEditorView: View {
                     .font(.headline)
                 Spacer()
                 Button("Add Task") {
-                    text.insert(contentsOf: "- [ ] \n", at: text.startIndex)
+                    text.insert(contentsOf: "[ ] \n", at: text.startIndex)
                 }
                 Button("Add Date") { insertDate() }
                 Button("Close") { onDismiss() }
@@ -117,15 +117,15 @@ class CheckboxNSTextView: NSTextView {
         let line = text.substring(with: lineRange)
         let offsetInLine = charIndex - lineRange.location
 
-        guard offsetInLine < 5 else { return false }
+        guard offsetInLine < 3 else { return false }
 
-        if line.hasPrefix("- [ ] ") {
-            let checkboxRange = NSRange(location: lineRange.location + 2, length: 3)
+        if line.hasPrefix("[ ] ") {
+            let checkboxRange = NSRange(location: lineRange.location, length: 3)
             replaceCharacters(in: checkboxRange, with: "[x]")
             delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
             return true
-        } else if line.hasPrefix("- [x] ") {
-            let checkboxRange = NSRange(location: lineRange.location + 2, length: 3)
+        } else if line.hasPrefix("[x] ") {
+            let checkboxRange = NSRange(location: lineRange.location, length: 3)
             replaceCharacters(in: checkboxRange, with: "[ ]")
             delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
             return true
