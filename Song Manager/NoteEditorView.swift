@@ -101,16 +101,16 @@ struct CheckboxTextEditor: NSViewRepresentable {
         for match in pattern.matches(in: markdown, range: NSRange(location: 0, length: nsString.length)) {
             if match.range.location > lastEnd {
                 let before = nsString.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
-                result.append(NSAttributedString(string: before, attributes: [.font: Self.regularFont]))
+                result.append(NSAttributedString(string: before, attributes: [.font: Self.regularFont, .foregroundColor: NSColor.textColor]))
             }
             let inner = nsString.substring(with: match.range(at: 1))
-            result.append(NSAttributedString(string: inner, attributes: [.font: Self.boldFont]))
+            result.append(NSAttributedString(string: inner, attributes: [.font: Self.boldFont, .foregroundColor: NSColor.textColor]))
             lastEnd = match.range.location + match.range.length
         }
 
         if lastEnd < nsString.length {
             let remaining = nsString.substring(with: NSRange(location: lastEnd, length: nsString.length - lastEnd))
-            result.append(NSAttributedString(string: remaining, attributes: [.font: Self.regularFont]))
+            result.append(NSAttributedString(string: remaining, attributes: [.font: Self.regularFont, .foregroundColor: NSColor.textColor]))
         }
 
         return result
