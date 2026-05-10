@@ -38,9 +38,6 @@ struct ContentView: View {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(sortedProjects) { project in
                         SongCard(project: project, store: store)
-                            .onTapGesture {
-                                Task { await store.play(project) }
-                            }
                             .contextMenu {
                                 Button {
                                     Task { await store.refreshAlbumArt(for: project) }

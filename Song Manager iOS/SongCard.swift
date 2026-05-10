@@ -5,14 +5,19 @@ struct SongCard: View {
     var store: SongStore
 
     var body: some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay { artLayer }
-            .overlay(alignment: .bottom) { pillOverlay }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .task(id: project.id) {
-                await store.loadAlbumArt(for: project)
-            }
+        Button {
+            Task { await store.play(project) }
+        } label: {
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay { artLayer }
+                .overlay(alignment: .bottom) { pillOverlay }
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .task(id: project.id) {
+            await store.loadAlbumArt(for: project)
+        }
     }
 
     private var pillOverlay: some View {
