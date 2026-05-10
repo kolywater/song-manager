@@ -9,6 +9,7 @@ import UIKit
 final class AudioService {
     var nowPlaying: ProjectReference?
     var isPlaying: Bool = false
+    var isLooping: Bool = false
     var currentTime: Double = 0
     var duration: Double = 0
 
@@ -112,6 +113,10 @@ final class AudioService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
+    func toggleLoop() {
+        isLooping.toggle()
+    }
+
     func skip(by delta: Double) {
         let target = max(0, min(duration > 0 ? duration : currentTime + delta, currentTime + delta))
         seek(to: target)
@@ -164,8 +169,14 @@ final class AudioService {
     }
 
     private func handleEnd() {
-        isPlaying = false
-        currentTime = duration
+        if isLooping {
+            seek(to: 0)
+            player?.play()
+            isPlaying = true
+        } else {
+            isPlaying = false
+            currentTime = duration
+        }
         updateNowPlayingInfo(artwork: nil, preserve: true)
     }
 

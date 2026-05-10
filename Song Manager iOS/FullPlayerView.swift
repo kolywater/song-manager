@@ -265,6 +265,8 @@ struct FullPlayerView: View {
     private var transport: some View {
         HStack {
             Spacer()
+            loopButton
+            Spacer()
             skipButton(seconds: -10, systemImage: "gobackward.10")
             Spacer()
             playPauseButton
@@ -274,6 +276,21 @@ struct FullPlayerView: View {
             addNoteButton
             Spacer()
         }
+    }
+
+    private var loopButton: some View {
+        Button {
+            store.audio.toggleLoop()
+        } label: {
+            Image(systemName: "repeat")
+                .font(.title3)
+                .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.3))
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle().fill(store.audio.isLooping ? Color.white.opacity(0.12) : .clear)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var playPauseButton: some View {
