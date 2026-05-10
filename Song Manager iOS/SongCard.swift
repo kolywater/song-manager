@@ -26,7 +26,7 @@ struct SongCard: View {
                         .tracking(0.5)
                 }
                 Text(project.displayTitle)
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(.system(size: 12, weight: .heavy))
                     .foregroundStyle(fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
