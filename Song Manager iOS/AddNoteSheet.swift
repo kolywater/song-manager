@@ -10,19 +10,20 @@ struct AddNoteSheet: View {
     @State private var tags: Set<String> = []
     @FocusState private var textFocused: Bool
 
-    private let allTags = ["arrangement", "chorus", "compression", "eq", "lyrics", "pc", "performance", "verse"]
+    private struct TagCategory {
+        let name: String
+        let tags: [String]
+    }
+
+    private let categories: [TagCategory] = [
+        TagCategory(name: "Instrument", tags: ["bass", "strings", "sub", "vox", "drums", "synth", "keys"]),
+        TagCategory(name: "Mixing", tags: ["eq", "compression", "volume", "saturation", "reverb/delay"]),
+        TagCategory(name: "Structure", tags: ["arrangement", "outro", "intro", "verse", "pc", "chorus", "bridge"])
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Note at \(timecode(currentTime))")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            Color.clear.frame(height: 16)
 
             TextEditor(text: $text)
                 .focused($textFocused)
@@ -47,31 +48,25 @@ struct AddNoteSheet: View {
                 }
                 .padding(.horizontal, 16)
 
-            FlowLayout(spacing: 8) {
-                ForEach(allTags, id: \.self) { tag in
-                    let isSelected = tags.contains(tag)
-                    Button {
-                        if isSelected { tags.remove(tag) } else { tags.insert(tag) }
-                    } label: {
-                        Text(tag)
-                            .font(.system(size: 14, weight: .semibold))
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(categories, id: \.name) { category in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(category.name.uppercased())
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .tracking(0.6)
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
-                            .background(isSelected ? Color.white.opacity(0.16) : Color.clear)
-                            .overlay(
-                                Capsule().stroke(
-                                    isSelected ? Color.white.opacity(0.5) : Color.white.opacity(0.18),
-                                    lineWidth: 1
-                                )
-                            )
-                            .clipShape(Capsule())
-                            .contentShape(Capsule())
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(category.tags, id: \.self) { tag in
+                                    tagChip(tag)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 16)
             .padding(.top, 16)
 
             Spacer(minLength: 12)
@@ -105,6 +100,29 @@ struct AddNoteSheet: View {
         }
     }
 
+    private func tagChip(_ tag: String) -> some View {
+        let isSelected = tags.contains(tag)
+        return Button {
+            if isSelected { tags.remove(tag) } else { tags.insert(tag) }
+        } label: {
+            Text(tag)
+                .font(.system(size: 14, weight: .semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
+                .background(isSelected ? Color.white.opacity(0.16) : Color.clear)
+                .overlay(
+                    Capsule().stroke(
+                        isSelected ? Color.white.opacity(0.5) : Color.white.opacity(0.18),
+                        lineWidth: 1
+                    )
+                )
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func save() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -114,11 +132,5 @@ struct AddNoteSheet: View {
             await store.addNote(note, to: project)
         }
         dismiss()
-    }
-
-    private func timecode(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let s = Int(seconds.rounded())
-        return "\(s / 60):\(String(format: "%02d", s % 60))"
     }
 }

@@ -9,7 +9,10 @@ final class WaveformService {
     private(set) var waveforms: [UUID: [Float]] = [:]
     private var inFlight: Set<UUID> = []
 
-    static let barCount = 150
+    static let barCount = 600
+    /// Bumped when the bar count or analysis output format changes, so
+    /// stale on-disk caches are skipped.
+    private static let cacheVersion = "v2"
 
     func loadWaveform(for project: ProjectReference, audioURL: URL) async {
         if waveforms[project.id] != nil { return }
@@ -45,7 +48,7 @@ final class WaveformService {
     }
 
     private static func cacheURL(for id: UUID) -> URL {
-        cacheDir().appending(path: "\(id.uuidString).json")
+        cacheDir().appending(path: "\(id.uuidString)-\(cacheVersion).json")
     }
 
     private static func loadFromDisk(id: UUID) -> [Float]? {

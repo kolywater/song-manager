@@ -9,7 +9,8 @@ struct SongCard: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay { artLayer }
             .overlay(alignment: .topLeading) { titleOverlay }
-            // .overlay(alignment: .bottom) { pillOverlay }  // hidden — replaced by titleOverlay
+            .overlay(alignment: .bottomTrailing) { playButtonOverlay }
+            // .overlay(alignment: .bottom) { pillOverlay }  // hidden — replaced by titleOverlay + playButtonOverlay
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .onTapGesture {
@@ -58,6 +59,26 @@ struct SongCard: View {
     }
 
     private var pillForeground: Color { .white }
+
+    private var playButtonOverlay: some View {
+        Image(systemName: "play.fill")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(playButtonForeground)
+            .frame(width: 56, height: 56)
+            .glassEffect(.clear, in: Circle())
+            .contentShape(Circle())
+            .highPriorityGesture(
+                TapGesture().onEnded {
+                    Task { await store.play(project, autoStart: true, showPlayer: false) }
+                }
+            )
+            .padding(12)
+    }
+
+    private var playButtonForeground: Color {
+        // Burning Bridges art is light — white play icon disappears.
+        project.displayName.lowercased().contains("burning bridges") ? .black : .white
+    }
 
     private var titleOverlay: some View {
         Text(project.displayTitle)

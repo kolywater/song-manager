@@ -34,6 +34,18 @@ final class SongStore {
 
     var isAuthorized: Bool { source != nil }
 
+    /// Centralizes Dropbox error handling. On auth expiry we drop the
+    /// source so `isAuthorized` flips false and `ContentView` re-presents
+    /// the Connect sheet. Any error message is surfaced via the toast.
+    private func handleDropboxError(_ error: Error) {
+        if let dbx = error as? DropboxProjectSource.DropboxSourceError, case .authExpired = dbx {
+            self.source = nil
+            errorMessage = dbx.localizedDescription
+            return
+        }
+        errorMessage = error.localizedDescription
+    }
+
     init() {
         let url = Self.defaultRegistryURL()
         self.registryURL = url
@@ -60,7 +72,7 @@ final class SongStore {
             self.source = try DropboxProjectSource(storageURL: registryURL)
         } catch {
             self.source = nil
-            errorMessage = error.localizedDescription
+            handleDropboxError(error)
             return false
         }
         Task { [weak self] in await self?.refreshActivityDates() }
@@ -148,7 +160,7 @@ final class SongStore {
                 return true
             }
         } catch {
-            errorMessage = error.localizedDescription
+            handleDropboxError(error)
         }
         isLoadingPicker = false
     }
@@ -269,7 +281,7 @@ final class SongStore {
                 await self.loadNotes(for: project)
             }
         } catch {
-            errorMessage = error.localizedDescription
+            handleDropboxError(error)
             audio.stop()
             presentingFullPlayer = false
         }
@@ -300,7 +312,7 @@ final class SongStore {
         do {
             try await source.saveNotes(current, for: project)
         } catch {
-            errorMessage = error.localizedDescription
+            handleDropboxError(error)
         }
     }
 
@@ -312,7 +324,7 @@ final class SongStore {
         do {
             try await source.saveNotes(current, for: project)
         } catch {
-            errorMessage = error.localizedDescription
+            handleDropboxError(error)
         }
     }
 
@@ -344,7 +356,13 @@ final class SongStore {
             albumArt[project.id] = image
             // Note: skipping applyArtSummary — the only consumer (pillOverlay) is hidden.
         } catch {
-            // Silent — placeholder remains visible.
+            // Non-auth errors here are silent — placeholder remains
+            // visible. Auth expiry, however, needs to surface so the
+            // user can reconnect.
+            if let dbx = error as? DropboxProjectSource.DropboxSourceError,
+               case .authExpired = dbx {
+                handleDropboxError(error)
+            }
         }
     }
 }

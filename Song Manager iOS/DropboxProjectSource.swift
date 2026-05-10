@@ -11,14 +11,32 @@ final class DropboxProjectSource: ProjectSource {
 
     enum DropboxSourceError: Error, LocalizedError {
         case notAuthorized
+        case authExpired
         case api(String)
 
         var errorDescription: String? {
             switch self {
             case .notAuthorized: return "Dropbox not connected. Tap Connect to paste a refresh token."
+            case .authExpired: return "Dropbox session expired — please reconnect."
             case .api(let message): return "Dropbox API error: \(message)"
             }
         }
+    }
+
+    /// SwiftyDropbox surfaces auth failures as `CallError.authError(...)`.
+    /// We can't pattern-match the generic without knowing the route's
+    /// error type, so we stringify and look for known auth markers.
+    private static func mapError(_ error: Any) -> DropboxSourceError {
+        let description = String(describing: error)
+        let lower = description.lowercased()
+        if lower.contains("autherror")
+            || lower.contains("expired_access_token")
+            || lower.contains("invalid_access_token")
+            || lower.contains("missing_scope")
+            || lower.contains("user_suspended") {
+            return .authExpired
+        }
+        return .api(description)
     }
 
     init(storageURL: URL) throws {
@@ -133,7 +151,7 @@ final class DropboxProjectSource: ProjectSource {
         try await withCheckedThrowingContinuation { continuation in
             client.files.getTemporaryLink(path: path).response { response, error in
                 if let error = error {
-                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    continuation.resume(throwing: Self.mapError(error))
                     return
                 }
                 guard let response, let url = URL(string: response.link) else {
@@ -179,7 +197,7 @@ final class DropboxProjectSource: ProjectSource {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             client.files.upload(path: path, mode: .overwrite, input: data).response { response, error in
                 if let error = error {
-                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    continuation.resume(throwing: Self.mapError(error))
                     return
                 }
                 _ = response
@@ -192,7 +210,7 @@ final class DropboxProjectSource: ProjectSource {
         try await withCheckedThrowingContinuation { continuation in
             client.files.listFolder(path: path).response { response, error in
                 if let error = error {
-                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    continuation.resume(throwing: Self.mapError(error))
                     return
                 }
                 continuation.resume(returning: response?.entries ?? [])
@@ -204,7 +222,7 @@ final class DropboxProjectSource: ProjectSource {
         try await withCheckedThrowingContinuation { continuation in
             client.files.download(path: path).response { response, error in
                 if let error = error {
-                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    continuation.resume(throwing: Self.mapError(error))
                     return
                 }
                 guard let response else {
@@ -220,7 +238,7 @@ final class DropboxProjectSource: ProjectSource {
         try await withCheckedThrowingContinuation { continuation in
             client.files.listFolder(path: rootPath).response { response, error in
                 if let error = error {
-                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    continuation.resume(throwing: Self.mapError(error))
                     return
                 }
                 guard let result = response else {

@@ -5,9 +5,18 @@ struct FullPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrubProgress: Double? = nil
     @State private var showAddNote: Bool = false
+    /// Suppresses auto-scroll while the user is interacting with the
+    /// scroll view (and for a grace period after they let go), so manual
+    /// scrolling isn't fought by the playback follow-along.
+    @State private var userScrolling: Bool = false
+    @State private var resumeAutoScroll: Task<Void, Never>?
 
     private let waveformColumnWidth: CGFloat = 56
-    private let barHeight: CGFloat = 8
+    /// Vertical pixels per waveform sample — smaller = denser silhouette.
+    /// 2pt × 600 samples ≈ 1200pt of scroll, matching the previous
+    /// 8pt × 150 layout while quadrupling on-screen detail.
+    private let barHeight: CGFloat = 2
+    private let autoScrollResumeDelay: Duration = .seconds(2.5)
 
     var body: some View {
         ZStack {
@@ -133,10 +142,28 @@ struct FullPlayerView: View {
                 .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
+            .onScrollPhaseChange { _, newPhase in
+                switch newPhase {
+                case .interacting, .tracking, .decelerating:
+                    userScrolling = true
+                    resumeAutoScroll?.cancel()
+                case .idle, .animating:
+                    resumeAutoScroll?.cancel()
+                    resumeAutoScroll = Task {
+                        try? await Task.sleep(for: autoScrollResumeDelay)
+                        if !Task.isCancelled {
+                            userScrolling = false
+                        }
+                    }
+                @unknown default:
+                    break
+                }
+            }
             .onChange(of: store.audio.currentTime) { _, _ in
                 guard scrubProgress == nil,
                       store.audio.isPlaying,
-                      store.audio.duration > 0 else { return }
+                      store.audio.duration > 0,
+                      !userScrolling else { return }
                 let pct = store.audio.currentTime / store.audio.duration
                 let bucket = min(99, max(0, Int(pct * 100)))
                 withAnimation(.linear(duration: 0.4)) {
@@ -150,6 +177,9 @@ struct FullPlayerView: View {
         GeometryReader { geo in
             let centerX = geo.size.width / 2
             let progress = playbackProgress
+            let playedHeight = max(0, CGFloat(progress) * totalH)
+            let shape = WaveformShape(bars: bars, maxAmp: 24)
+
             ZStack(alignment: .topLeading) {
                 Rectangle()
                     .fill(Color.white.opacity(0.06))
@@ -157,21 +187,44 @@ struct FullPlayerView: View {
                     .offset(x: centerX - 0.5)
                     .frame(height: totalH)
 
-                Canvas { context, size in
-                    guard bars.count > 1 else { return }
-                    let path = Self.waveformPath(bars: bars, in: size, maxAmp: 22)
+                // Unplayed silhouette — soft top-to-bottom fade so the
+                // future portion of the song reads as faded glass.
+                shape
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.26),
+                                .white.opacity(0.10)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: geo.size.width, height: totalH)
+                    .allowsHitTesting(false)
 
-                    context.fill(path, with: .color(.white.opacity(0.22)))
-
-                    let playedHeight = CGFloat(progress) * size.height
-                    if playedHeight > 0 {
-                        var played = context
-                        played.clip(to: Path(CGRect(x: 0, y: 0, width: size.width, height: playedHeight)))
-                        played.fill(path, with: .color(.white.opacity(0.85)))
-                    }
-                }
-                .frame(width: geo.size.width, height: totalH)
-                .allowsHitTesting(false)
+                // Played silhouette — full-canvas gradient that peaks
+                // at the playhead, then masked to the played region.
+                // Stops anchored at `progress` keep the brightest
+                // band glued to the moving playhead.
+                shape
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white.opacity(0.55), location: 0),
+                                .init(color: Color(red: 0.92, green: 0.96, blue: 1.0), location: max(0.001, progress))
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: geo.size.width, height: totalH)
+                    .mask(
+                        Rectangle()
+                            .frame(width: geo.size.width, height: playedHeight)
+                            .frame(width: geo.size.width, height: totalH, alignment: .top)
+                    )
+                    .allowsHitTesting(false)
 
                 Rectangle()
                     .fill(Color.white)
@@ -196,25 +249,53 @@ struct FullPlayerView: View {
         .frame(width: waveformColumnWidth, height: totalH)
     }
 
-    /// Build a closed waveform shape: trace the right edge from top to
-    /// bottom following amplitudes, then come back up the left edge.
-    private static func waveformPath(bars: [Double], in size: CGSize, maxAmp: CGFloat) -> Path {
+    /// Build a closed waveform shape with smoothed edges. Each side of
+    /// the waveform is traced as a series of quadratic curves between
+    /// midpoints of adjacent samples — this softens the jagged
+    /// straight-line silhouette into something that reads as an organic
+    /// envelope.
+    fileprivate static func waveformPath(bars: [Double], in size: CGSize, maxAmp: CGFloat) -> Path {
         let centerX = size.width / 2
         let count = bars.count
         let stepY = size.height / CGFloat(max(1, count - 1))
 
-        var path = Path()
-        let firstAmp = max(1, CGFloat(bars[0]) * maxAmp)
-        path.move(to: CGPoint(x: centerX + firstAmp, y: 0))
+        func point(side: CGFloat, index: Int) -> CGPoint {
+            let amp = max(1, CGFloat(bars[index]) * maxAmp)
+            return CGPoint(x: centerX + side * amp, y: CGFloat(index) * stepY)
+        }
 
-        for i in 1..<count {
-            let amp = max(1, CGFloat(bars[i]) * maxAmp)
-            path.addLine(to: CGPoint(x: centerX + amp, y: CGFloat(i) * stepY))
+        func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
         }
-        for i in (0..<count).reversed() {
-            let amp = max(1, CGFloat(bars[i]) * maxAmp)
-            path.addLine(to: CGPoint(x: centerX - amp, y: CGFloat(i) * stepY))
+
+        // Walk one edge of the waveform using midpoint smoothing:
+        // line from midpoint(i-1,i) curving through anchor at index i to
+        // midpoint(i,i+1). Endpoints anchor at the first/last sample.
+        func appendSmoothed(side: CGFloat, indices: [Int], to path: inout Path, startsPath: Bool) {
+            guard indices.count >= 2 else { return }
+            let pts = indices.map { point(side: side, index: $0) }
+
+            if startsPath {
+                path.move(to: pts[0])
+            } else {
+                path.addLine(to: pts[0])
+            }
+
+            if pts.count == 2 {
+                path.addLine(to: pts[1])
+                return
+            }
+
+            for i in 1..<(pts.count - 1) {
+                let mid = midpoint(pts[i], pts[i + 1])
+                path.addQuadCurve(to: mid, control: pts[i])
+            }
+            path.addLine(to: pts.last!)
         }
+
+        var path = Path()
+        appendSmoothed(side: 1, indices: Array(0..<count), to: &path, startsPath: true)
+        appendSmoothed(side: -1, indices: Array((0..<count).reversed()), to: &path, startsPath: false)
         path.closeSubpath()
         return path
     }
@@ -413,6 +494,18 @@ struct FullPlayerView: View {
             let jitter = (next() - 0.5) * 0.55
             return max(0.05, min(1, envelope + jitter))
         }
+    }
+}
+
+// MARK: - Waveform shape
+
+private struct WaveformShape: Shape {
+    let bars: [Double]
+    let maxAmp: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        guard bars.count > 1 else { return Path() }
+        return FullPlayerView.waveformPath(bars: bars, in: rect.size, maxAmp: maxAmp)
     }
 }
 

@@ -17,6 +17,7 @@ final class AudioService {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var isSeeking: Bool = false
+    private var lastNowPlayingPush: Date = .distantPast
 
     init() {
         configureSession()
@@ -151,14 +152,22 @@ final class AudioService {
     }
 
     private func attachTimeObserver() {
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        // 20 Hz — fine-grained enough that the waveform playhead reads as
+        // smooth motion, not stepwise. Lock-screen / now-playing info is
+        // throttled to ~2 Hz inside the callback to avoid spamming
+        // MPNowPlayingInfoCenter.
+        let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
             if self.isSeeking { return }
             let seconds = time.seconds
             if seconds.isFinite {
                 self.currentTime = seconds
-                self.updateNowPlayingInfo(artwork: nil, preserve: true)
+                let now = Date()
+                if now.timeIntervalSince(self.lastNowPlayingPush) >= 0.5 {
+                    self.lastNowPlayingPush = now
+                    self.updateNowPlayingInfo(artwork: nil, preserve: true)
+                }
             }
         }
     }
