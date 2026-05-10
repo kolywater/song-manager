@@ -3,6 +3,7 @@ import Foundation
 struct FolderRef: Identifiable, Hashable, Codable {
     let id: String
     let displayName: String
+    let location: SourceLocator
 }
 
 protocol ProjectSource {

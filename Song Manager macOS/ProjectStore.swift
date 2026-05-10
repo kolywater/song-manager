@@ -2,7 +2,6 @@ import AppKit
 import Observation
 import SwiftUI
 
-private let songMetadataFilename = "SongManagerData.json"
 private let notesFilename = "_NOTES.md"
 
 enum SortMode: String, CaseIterable {
@@ -18,7 +17,9 @@ final class ProjectStore {
     var albumArtCache: [UUID: NSImage] = [:]
     var errorMessage: String?
 
-    private var storageURL: URL {
+    private let source: LocalProjectSource
+
+    private static func defaultStorageURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let folder = appSupport.appending(path: "Adenel Songs")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -44,6 +45,7 @@ final class ProjectStore {
     }
 
     init() {
+        self.source = LocalProjectSource(storageURL: Self.defaultStorageURL())
         load()
         if let raw = UserDefaults.standard.string(forKey: "sortMode"),
            let mode = SortMode(rawValue: raw) {
@@ -51,89 +53,13 @@ final class ProjectStore {
         }
     }
 
-    // MARK: - Per-Song Metadata Helpers
-
-    private func songMetadataURL(for rootURL: URL) -> URL {
-        rootURL.appending(path: songMetadataFilename)
-    }
-
-    private func loadSongMetadata(from rootURL: URL) -> SongMetadata? {
-        let url = songMetadataURL(for: rootURL)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(SongMetadata.self, from: data)
-    }
-
-    private func saveSongMetadata(_ metadata: SongMetadata, to rootURL: URL) {
-        let url = songMetadataURL(for: rootURL)
-        guard let data = try? JSONEncoder().encode(metadata) else { return }
-        try? data.write(to: url, options: .atomic)
-    }
-
-    private func populateScannedFields(_ project: inout ProjectReference, rootURL: URL) {
-        project.displayName = rootURL.lastPathComponent
-
-        let scanResult = ProjectScanner.scan(rootURL: rootURL)
-
-        if let latestALS = scanResult.alsFiles.last {
-            let stem = latestALS.deletingPathExtension().lastPathComponent
-            if let version = VersionService.parseVersion(fromStem: stem) {
-                project.latestVersionString = version.map(String.init).joined(separator: ".")
-            }
-            project.latestALSModDate = (try? latestALS.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        }
-        project.latestBounceFilename = scanResult.bounceFiles.last?.lastPathComponent
-        project.albumArtFilename = scanResult.albumArtURL?.lastPathComponent
-        project.hasMastersFolder = scanResult.hasMastersFolder
-        project.masterFilenames = scanResult.masterFiles.map(\.lastPathComponent)
-
-        if let meta = loadSongMetadata(from: rootURL) {
-            project.selectedMasterFilename = meta.selectedMasterFilename
-            project.gradientHue = meta.gradientHue
-        }
-
-        if let art = ProjectScanner.loadAlbumArt(from: scanResult.albumArtURL) {
-            albumArtCache[project.id] = art
-        }
-    }
-
     // MARK: - Persistence
 
     func load() {
-        guard FileManager.default.fileExists(atPath: storageURL.path(percentEncoded: false)),
-              let data = try? Data(contentsOf: storageURL)
-        else { return }
-
-        if let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
-            projects = registry.entries.map { entry in
-                ProjectReference(id: entry.id, displayName: "", location: entry.location)
-            }
-            for i in projects.indices {
-                rescanProject(at: i)
-            }
-            return
+        projects = (try? source.loadProjects()) ?? []
+        for i in projects.indices {
+            albumArtCache[projects[i].id] = source.loadAlbumArt(for: &projects[i])
         }
-
-        if let legacy = try? JSONDecoder().decode([ProjectReference].self, from: data) {
-            projects = legacy
-            for i in projects.indices {
-                migrateAndRescan(at: i)
-            }
-            saveRegistry()
-        }
-    }
-
-    private func migrateAndRescan(at index: Int) {
-        let project = projects[index]
-        guard let url = resolveBookmark(for: project) else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-
-        if project.selectedMasterFilename != nil {
-            let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename, gradientHue: project.gradientHue)
-            saveSongMetadata(meta, to: url)
-        }
-
-        populateScannedFields(&projects[index], rootURL: url)
     }
 
     func save() {
@@ -144,44 +70,29 @@ final class ProjectStore {
             defer { url.stopAccessingSecurityScopedResource() }
 
             let meta = SongMetadata(selectedMasterFilename: project.selectedMasterFilename, gradientHue: project.gradientHue)
-            saveSongMetadata(meta, to: url)
+            source.saveSongMetadata(meta, to: url)
         }
     }
 
     private func saveRegistry() {
-        let entries = projects.map { ProjectRegistry.Entry(id: $0.id, location: $0.location) }
-        let registry = ProjectRegistry(entries: entries)
-        guard let data = try? JSONEncoder().encode(registry) else { return }
-        try? data.write(to: storageURL, options: .atomic)
+        source.saveRegistry(projects)
     }
 
     // MARK: - Add / Remove
 
     func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select an Ableton Live project folder"
+        let folders = (try? source.listAvailableFolders()) ?? []
+        guard let folder = folders.first else { return }
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var project = ProjectReference(displayName: folder.displayName, location: folder.location)
+        source.scan(&project)
 
-        guard let bookmark = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) else {
-            errorMessage = "Failed to create bookmark for folder"
-            return
-        }
-
-        let name = url.lastPathComponent
-        var project = ProjectReference(displayName: name, location: .localBookmark(bookmark))
-
-        if url.startAccessingSecurityScopedResource() {
-            defer { url.stopAccessingSecurityScopedResource() }
-            populateScannedFields(&project, rootURL: url)
-            saveSongMetadata(SongMetadata(), to: url)
+        if let url = source.resolveBookmark(for: &project) {
+            if url.startAccessingSecurityScopedResource() {
+                defer { url.stopAccessingSecurityScopedResource() }
+                source.saveSongMetadata(SongMetadata(), to: url)
+            }
+            albumArtCache[project.id] = source.loadAlbumArt(for: &project)
         }
 
         projects.append(project)
@@ -201,24 +112,14 @@ final class ProjectStore {
     // MARK: - Bookmark Resolution
 
     func resolveBookmark(for project: ProjectReference) -> URL? {
-        guard case .localBookmark(let bookmark) = project.location else { return nil }
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return nil }
-
-        if isStale, let newBookmark = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        ) {
-            if let idx = projects.firstIndex(where: { $0.id == project.id }) {
-                projects[idx].location = .localBookmark(newBookmark)
-                saveRegistry()
-            }
+        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else {
+            var copy = project
+            return source.resolveBookmark(for: &copy)
+        }
+        let oldLocation = projects[idx].location
+        let url = source.resolveBookmark(for: &projects[idx])
+        if projects[idx].location != oldLocation {
+            saveRegistry()
         }
         return url
     }
@@ -284,7 +185,7 @@ final class ProjectStore {
             if url.startAccessingSecurityScopedResource() {
                 defer { url.stopAccessingSecurityScopedResource() }
                 let meta = SongMetadata(selectedMasterFilename: filename, gradientHue: projects[idx].gradientHue)
-                saveSongMetadata(meta, to: url)
+                source.saveSongMetadata(meta, to: url)
             }
         }
         saveRegistry()
@@ -373,11 +274,11 @@ final class ProjectStore {
     }
 
     private func rescanProject(at index: Int) {
-        let project = projects[index]
-        guard let url = resolveBookmark(for: project) else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-
-        populateScannedFields(&projects[index], rootURL: url)
+        let oldLocation = projects[index].location
+        source.scan(&projects[index])
+        albumArtCache[projects[index].id] = source.loadAlbumArt(for: &projects[index])
+        if projects[index].location != oldLocation {
+            saveRegistry()
+        }
     }
 }
