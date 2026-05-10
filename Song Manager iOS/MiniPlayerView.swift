@@ -5,45 +5,51 @@ struct MiniPlayerView: View {
 
     var body: some View {
         if let project = store.audio.nowPlaying {
-            HStack(spacing: 12) {
-                artwork(for: project)
-                    .frame(width: 42, height: 42)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    artwork(for: project)
+                        .frame(width: 42, height: 42)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(project.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    if store.audio.duration > 0 {
-                        Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(project.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if store.audio.duration > 0 {
+                            Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        store.audio.togglePlay()
+                    } label: {
+                        Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title3)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        store.audio.stop()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.footnote.weight(.semibold))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
 
-                Spacer(minLength: 8)
-
-                Button {
-                    store.audio.togglePlay()
-                } label: {
-                    Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+                ScrubBar(progress: progress) { pct in
+                    store.audio.seek(to: pct * store.audio.duration)
                 }
-                .buttonStyle(.plain)
-
-                Button {
-                    store.audio.stop()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.footnote.weight(.semibold))
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -56,6 +62,11 @@ struct MiniPlayerView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
+    }
+
+    private var progress: Double {
+        guard store.audio.duration > 0 else { return 0 }
+        return min(1, max(0, store.audio.currentTime / store.audio.duration))
     }
 
     @ViewBuilder
@@ -77,5 +88,31 @@ struct MiniPlayerView: View {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let s = Int(seconds.rounded())
         return "\(s / 60):\(String(format: "%02d", s % 60))"
+    }
+}
+
+private struct ScrubBar: View {
+    var progress: Double
+    var onScrub: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.12))
+                Capsule()
+                    .fill(Color.primary.opacity(0.7))
+                    .frame(width: max(0, geo.size.width * progress))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let pct = max(0, min(1, value.location.x / geo.size.width))
+                        onScrub(pct)
+                    }
+            )
+        }
+        .frame(height: 3)
     }
 }
