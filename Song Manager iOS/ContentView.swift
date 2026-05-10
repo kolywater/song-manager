@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var store = SongStore()
     @State private var showAddSheet = false
     @State private var sortMode: LibrarySortMode = .recent
+    @State private var bgProjectID: UUID?
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -55,7 +56,10 @@ struct ContentView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
             }
-            .background(Color(.systemBackground))
+            .background {
+                blurredBackground
+                    .ignoresSafeArea()
+            }
             .overlay {
                 if store.projects.isEmpty {
                     ContentUnavailableView {
@@ -65,7 +69,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationTitle("Adenel")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
@@ -89,6 +92,13 @@ struct ContentView: View {
             .sheet(isPresented: $showAddSheet) {
                 AddSongSheet(store: store)
             }
+            .sheet(isPresented: .constant(!store.isAuthorized)) {
+                DropboxConnectView(store: store)
+                    .interactiveDismissDisabled()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dropboxAuthDidChange)) { _ in
+                store.rebuildSourceFromKeychain()
+            }
             .safeAreaInset(edge: .bottom) {
                 MiniPlayerView(store: store)
             }
@@ -100,6 +110,45 @@ struct ContentView: View {
             if DevHarness.autoOpenPlayer, let first = store.projects.first {
                 await store.play(first)
             }
+        }
+        .task(id: store.projects.map(\.id)) {
+            guard bgProjectID == nil else { return }
+            let allowed = ["moonlit", "burning bridges", "the only", "veil", "falling into the sun"]
+            let pool = store.projects.filter { project in
+                let name = project.displayName.lowercased()
+                return allowed.contains { name.contains($0) }
+            }
+            // Prefer art already loaded by visible cards.
+            let loaded = pool.filter { store.albumArt[$0.id] != nil }
+            if let chosen = loaded.randomElement() {
+                bgProjectID = chosen.id
+                return
+            }
+            // Otherwise try the allow-listed pool in random order.
+            for project in pool.shuffled() {
+                await store.loadAlbumArt(for: project)
+                if store.albumArt[project.id] != nil {
+                    bgProjectID = project.id
+                    return
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var blurredBackground: some View {
+        if let id = bgProjectID, let art = store.albumArt[id] {
+            GeometryReader { geo in
+                Image(uiImage: art)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(1.4)
+                    .blur(radius: 60)
+                    .clipped()
+            }
+        } else {
+            Color(.systemBackground)
         }
     }
 }

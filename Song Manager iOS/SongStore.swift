@@ -2,6 +2,7 @@ import CoreImage
 import Foundation
 import Observation
 import SwiftUI
+import SwiftyDropbox
 import UIKit
 
 @MainActor
@@ -26,23 +27,44 @@ final class SongStore {
     let audio = AudioService()
     let waveform = WaveformService()
 
-    private let source: DropboxProjectSource?
+    private(set) var source: DropboxProjectSource?
+    private let registryURL: URL
     private var artInFlight: Set<UUID> = []
     private var notesInFlight: Set<UUID> = []
 
+    var isAuthorized: Bool { source != nil }
+
     init() {
         let url = Self.defaultRegistryURL()
+        self.registryURL = url
         do {
-            self.source = try DropboxProjectSource(accessToken: DropboxConfig.accessToken, storageURL: url)
+            self.source = try DropboxProjectSource(storageURL: url)
         } catch {
             self.source = nil
-            self.errorMessage = error.localizedDescription
         }
         loadFromDisk(at: url)
         activityDates = Self.loadActivityDatesFromDisk()
-        Task { [weak self] in
-            await self?.refreshActivityDates()
+        if source != nil {
+            Task { [weak self] in
+                await self?.refreshActivityDates()
+            }
         }
+    }
+
+    /// Rebuilds the project source after the OAuth manager's Keychain is
+    /// populated (called on .dropboxAuthDidChange). Returns whether a
+    /// source could be built.
+    @discardableResult
+    func rebuildSourceFromKeychain() -> Bool {
+        do {
+            self.source = try DropboxProjectSource(storageURL: registryURL)
+        } catch {
+            self.source = nil
+            errorMessage = error.localizedDescription
+            return false
+        }
+        Task { [weak self] in await self?.refreshActivityDates() }
+        return true
     }
 
     private static func defaultRegistryURL() -> URL {
@@ -232,6 +254,7 @@ final class SongStore {
             guard let url = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
                 errorMessage = "No bounces found in \(project.displayName)"
                 audio.stop()
+                presentingFullPlayer = false
                 return
             }
             // Bail if the user already moved on to a different project.
@@ -248,6 +271,7 @@ final class SongStore {
         } catch {
             errorMessage = error.localizedDescription
             audio.stop()
+            presentingFullPlayer = false
         }
     }
 
@@ -303,7 +327,7 @@ final class SongStore {
         if let data = try? Data(contentsOf: cacheURL),
            let image = UIImage(data: data) {
             albumArt[project.id] = image
-            applyArtSummary(image, projectID: project.id)
+            // Skip applyArtSummary — the only consumer (pillOverlay) is hidden.
             return
         }
 
@@ -318,7 +342,7 @@ final class SongStore {
                   let image = UIImage(data: data) else { return }
             try? data.write(to: cacheURL, options: .atomic)
             albumArt[project.id] = image
-            applyArtSummary(image, projectID: project.id)
+            // Note: skipping applyArtSummary — the only consumer (pillOverlay) is hidden.
         } catch {
             // Silent — placeholder remains visible.
         }

@@ -8,7 +8,8 @@ struct SongCard: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay { artLayer }
-            .overlay(alignment: .bottom) { pillOverlay }
+            .overlay(alignment: .topLeading) { titleOverlay }
+            // .overlay(alignment: .bottom) { pillOverlay }  // hidden — replaced by titleOverlay
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .onTapGesture {
@@ -57,6 +58,19 @@ struct SongCard: View {
     }
 
     private var pillForeground: Color { .white }
+
+    private var titleOverlay: some View {
+        Text(project.displayTitle)
+            .font(.system(size: 28, weight: .heavy))
+            .foregroundStyle(.white)
+            .lineLimit(3)
+            .multilineTextAlignment(.leading)
+            .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 1)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.top, 18)
+            .padding(.horizontal, 20)
+            .allowsHitTesting(false)
+    }
 
     @ViewBuilder
     private var artLayer: some View {

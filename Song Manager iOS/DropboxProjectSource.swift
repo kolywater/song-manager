@@ -10,20 +10,23 @@ final class DropboxProjectSource: ProjectSource {
     private let client: DropboxClient
 
     enum DropboxSourceError: Error, LocalizedError {
-        case noToken
+        case notAuthorized
         case api(String)
 
         var errorDescription: String? {
             switch self {
-            case .noToken: return "Dropbox access token is empty. Set DropboxConfig.accessToken."
+            case .notAuthorized: return "Dropbox not connected. Tap Connect to paste a refresh token."
             case .api(let message): return "Dropbox API error: \(message)"
             }
         }
     }
 
-    init(accessToken: String, storageURL: URL) throws {
-        guard !accessToken.isEmpty else { throw DropboxSourceError.noToken }
-        self.client = DropboxClient(accessToken: accessToken)
+    init(storageURL: URL) throws {
+        guard let oauth = DropboxOAuthManager.sharedOAuthManager,
+              let token = oauth.getFirstAccessToken() else {
+            throw DropboxSourceError.notAuthorized
+        }
+        self.client = DropboxClient(accessToken: token, dropboxOauthManager: oauth)
         self.storageURL = storageURL
     }
 
