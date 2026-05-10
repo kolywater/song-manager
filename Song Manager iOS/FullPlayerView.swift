@@ -3,6 +3,7 @@ import SwiftUI
 struct FullPlayerView: View {
     var store: SongStore
     @Environment(\.dismiss) private var dismiss
+    @State private var scrubProgress: Double? = nil
 
     var body: some View {
         ZStack {
@@ -91,8 +92,12 @@ struct FullPlayerView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        scrubProgress = max(0, min(1, value.location.y / totalH))
+                    }
+                    .onEnded { value in
                         let pct = max(0, min(1, value.location.y / totalH))
                         store.audio.seek(to: pct * store.audio.duration)
+                        scrubProgress = nil
                     }
             )
         }
@@ -112,19 +117,25 @@ struct FullPlayerView: View {
     }
 
     private var playbackProgress: Double {
+        if let scrubProgress { return scrubProgress }
         guard store.audio.duration > 0 else { return 0 }
         return min(1, max(0, store.audio.currentTime / store.audio.duration))
+    }
+
+    private var displayedTime: Double {
+        if let scrubProgress { return scrubProgress * store.audio.duration }
+        return store.audio.currentTime
     }
 
     // MARK: - Time display
 
     private var timeDisplay: some View {
         HStack {
-            Text(timecode(store.audio.currentTime))
+            Text(timecode(displayedTime))
                 .font(.caption.weight(.heavy))
                 .foregroundStyle(Color.white.opacity(0.6))
             Spacer()
-            Text("−" + timecode(max(0, store.audio.duration - store.audio.currentTime)))
+            Text("−" + timecode(max(0, store.audio.duration - displayedTime)))
                 .font(.caption)
                 .foregroundStyle(Color.white.opacity(0.32))
         }

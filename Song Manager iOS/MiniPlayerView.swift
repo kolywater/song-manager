@@ -99,22 +99,28 @@ struct MiniPlayerView: View {
 private struct ScrubBar: View {
     var progress: Double
     var onScrub: (Double) -> Void
+    @State private var dragProgress: Double? = nil
 
     var body: some View {
         GeometryReader { geo in
+            let displayProgress = dragProgress ?? progress
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.12))
                 Capsule()
                     .fill(Color.primary.opacity(0.7))
-                    .frame(width: max(0, geo.size.width * progress))
+                    .frame(width: max(0, geo.size.width * displayProgress))
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
+                        dragProgress = max(0, min(1, value.location.x / geo.size.width))
+                    }
+                    .onEnded { value in
                         let pct = max(0, min(1, value.location.x / geo.size.width))
                         onScrub(pct)
+                        dragProgress = nil
                     }
             )
         }
