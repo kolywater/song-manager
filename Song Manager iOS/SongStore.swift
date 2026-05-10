@@ -9,9 +9,9 @@ final class SongStore {
     var projects: [ProjectReference] = []
     var availableFolders: [FolderRef] = []
     var albumArt: [UUID: UIImage] = [:]
-    /// Luminance of the bottom strip of the album art (0 = black, 1 = white).
+    /// Average luminance of the album art (0 = black, 1 = white).
     /// Used by SongCard to flip the pill's foreground between black/white.
-    var artBottomLuminance: [UUID: Double] = [:]
+    var artLuminance: [UUID: Double] = [:]
     var errorMessage: String?
     var isLoadingPicker = false
     var presentingFullPlayer: Bool = false
@@ -50,19 +50,11 @@ final class SongStore {
         albumArtCacheDir().appending(path: "\(id.uuidString).bin")
     }
 
-    /// Average luminance (0–1) of the bottom 25% of an image. Used to
-    /// pick a contrasting foreground color for the pill overlay.
-    private static func bottomLuminance(of image: UIImage) -> Double {
+    /// Average luminance (0–1) of the entire image. Used to pick a
+    /// contrasting foreground color for the pill overlay.
+    private static func averageLuminance(of image: UIImage) -> Double {
         guard let cgImage = image.cgImage else { return 0 }
-        let height = CGFloat(cgImage.height)
-        let bottom = CGRect(
-            x: 0,
-            y: height * 0.75,
-            width: CGFloat(cgImage.width),
-            height: height * 0.25
-        )
-        guard let cropped = cgImage.cropping(to: bottom) else { return 0 }
-        let ciImage = CIImage(cgImage: cropped)
+        let ciImage = CIImage(cgImage: cgImage)
         let extent = ciImage.extent
         let inputExtent = CIVector(x: extent.origin.x, y: extent.origin.y, z: extent.size.width, w: extent.size.height)
         guard let filter = CIFilter(
@@ -130,7 +122,7 @@ final class SongStore {
         projects.removeAll { $0.id == project.id }
         source?.saveRegistry(projects)
         albumArt.removeValue(forKey: project.id)
-        artBottomLuminance.removeValue(forKey: project.id)
+        artLuminance.removeValue(forKey: project.id)
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)
     }
@@ -235,7 +227,7 @@ final class SongStore {
         if let data = try? Data(contentsOf: cacheURL),
            let image = UIImage(data: data) {
             albumArt[project.id] = image
-            artBottomLuminance[project.id] = Self.bottomLuminance(of: image)
+            artLuminance[project.id] = Self.averageLuminance(of: image)
             return
         }
 
@@ -250,7 +242,7 @@ final class SongStore {
                   let image = UIImage(data: data) else { return }
             try? data.write(to: cacheURL, options: .atomic)
             albumArt[project.id] = image
-            artBottomLuminance[project.id] = Self.bottomLuminance(of: image)
+            artLuminance[project.id] = Self.averageLuminance(of: image)
         } catch {
             // Silent — placeholder remains visible.
         }

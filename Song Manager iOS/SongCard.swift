@@ -51,10 +51,10 @@ struct SongCard: View {
         .padding(8)
     }
 
-    /// Black if the artwork's bottom strip is light; white otherwise.
+    /// Black if the artwork is light overall; white otherwise.
     private var pillForeground: Color {
-        let lum = store.artBottomLuminance[project.id] ?? 0
-        return lum > 0.6 ? .black : .white
+        let lum = store.artLuminance[project.id] ?? 0
+        return lum > 0.45 ? .black : .white
     }
 
     @ViewBuilder
