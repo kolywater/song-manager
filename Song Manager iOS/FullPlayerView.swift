@@ -11,7 +11,7 @@ struct FullPlayerView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            blurredBackground
             if let project = store.audio.nowPlaying {
                 VStack(spacing: 0) {
                     topBar(project: project)
@@ -40,6 +40,28 @@ struct FullPlayerView: View {
         .preferredColorScheme(.dark)
     }
 
+    // MARK: - Background
+
+    @ViewBuilder
+    private var blurredBackground: some View {
+        if let project = store.audio.nowPlaying,
+           let art = store.albumArt[project.id] {
+            GeometryReader { geo in
+                Image(uiImage: art)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(1.4)
+                    .blur(radius: 60)
+                    .clipped()
+            }
+            .ignoresSafeArea()
+            .overlay(Color.black.opacity(0.45).ignoresSafeArea())
+        } else {
+            Color.black.ignoresSafeArea()
+        }
+    }
+
     // MARK: - Top bar
 
     private func topBar(project: ProjectReference) -> some View {
@@ -50,8 +72,8 @@ struct FullPlayerView: View {
                 Image(systemName: "chevron.down")
                     .font(.body.weight(.semibold))
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.white.opacity(0.10)))
                     .foregroundStyle(.white.opacity(0.85))
+                    .glassEffect(.regular.interactive(), in: Circle())
             }
             .buttonStyle(.plain)
 
@@ -284,11 +306,9 @@ struct FullPlayerView: View {
         } label: {
             Image(systemName: "repeat")
                 .font(.title3)
-                .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.3))
-                .frame(width: 40, height: 40)
-                .background(
-                    Circle().fill(store.audio.isLooping ? Color.white.opacity(0.12) : .clear)
-                )
+                .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.5))
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
     }
@@ -299,10 +319,9 @@ struct FullPlayerView: View {
         } label: {
             Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
                 .font(.title.weight(.semibold))
-                .foregroundStyle(.black)
-                .frame(width: 64, height: 64)
-                .background(Circle().fill(.white))
-                .shadow(color: .white.opacity(0.18), radius: 14, y: 3)
+                .foregroundStyle(.white)
+                .frame(width: 68, height: 68)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
     }
@@ -313,8 +332,9 @@ struct FullPlayerView: View {
         } label: {
             Image(systemName: systemImage)
                 .font(.title2)
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 50, height: 50)
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 52, height: 52)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
     }
@@ -326,9 +346,9 @@ struct FullPlayerView: View {
         } label: {
             Image(systemName: "plus")
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 40, height: 40)
-                .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 1))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
     }
