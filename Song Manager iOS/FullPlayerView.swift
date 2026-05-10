@@ -111,7 +111,7 @@ struct FullPlayerView: View {
                         .frame(width: waveformColumnWidth)
 
                     ForEach(projectNotes) { note in
-                        commentPin(note: note, totalH: totalH)
+                        commentPin(note: note, project: project, totalH: totalH)
                     }
 
                     if projectNotes.isEmpty {
@@ -154,16 +154,21 @@ struct FullPlayerView: View {
                     .offset(x: centerX - 0.5)
                     .frame(height: totalH)
 
-                ForEach(Array(bars.enumerated()), id: \.offset) { idx, amp in
-                    let pct = Double(idx) / Double(bars.count)
-                    let played = pct < progress
-                    let isHead = abs(pct - progress) < (1.0 / Double(bars.count) * 0.6)
-                    let halfWidth = max(2, amp * 22)
-                    Rectangle()
-                        .fill(barColor(played: played, isHead: isHead))
-                        .frame(width: halfWidth * 2, height: max(1.5, barHeight - 1.5))
-                        .position(x: centerX, y: CGFloat(idx) * barHeight + barHeight / 2)
+                Canvas { context, size in
+                    guard bars.count > 1 else { return }
+                    let path = Self.waveformPath(bars: bars, in: size, maxAmp: 22)
+
+                    context.fill(path, with: .color(.white.opacity(0.22)))
+
+                    let playedHeight = CGFloat(progress) * size.height
+                    if playedHeight > 0 {
+                        var played = context
+                        played.clip(to: Path(CGRect(x: 0, y: 0, width: size.width, height: playedHeight)))
+                        played.fill(path, with: .color(.white.opacity(0.85)))
+                    }
                 }
+                .frame(width: geo.size.width, height: totalH)
+                .allowsHitTesting(false)
 
                 Rectangle()
                     .fill(Color.white)
@@ -188,7 +193,30 @@ struct FullPlayerView: View {
         .frame(width: waveformColumnWidth, height: totalH)
     }
 
-    private func commentPin(note: Note, totalH: CGFloat) -> some View {
+    /// Build a closed waveform shape: trace the right edge from top to
+    /// bottom following amplitudes, then come back up the left edge.
+    private static func waveformPath(bars: [Double], in size: CGSize, maxAmp: CGFloat) -> Path {
+        let centerX = size.width / 2
+        let count = bars.count
+        let stepY = size.height / CGFloat(max(1, count - 1))
+
+        var path = Path()
+        let firstAmp = max(1, CGFloat(bars[0]) * maxAmp)
+        path.move(to: CGPoint(x: centerX + firstAmp, y: 0))
+
+        for i in 1..<count {
+            let amp = max(1, CGFloat(bars[i]) * maxAmp)
+            path.addLine(to: CGPoint(x: centerX + amp, y: CGFloat(i) * stepY))
+        }
+        for i in (0..<count).reversed() {
+            let amp = max(1, CGFloat(bars[i]) * maxAmp)
+            path.addLine(to: CGPoint(x: centerX - amp, y: CGFloat(i) * stepY))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func commentPin(note: Note, project: ProjectReference, totalH: CGFloat) -> some View {
         let duration = store.audio.duration
         let y = duration > 0 ? CGFloat(note.time / duration) * totalH : 0
         return HStack(alignment: .top, spacing: 0) {
@@ -201,7 +229,7 @@ struct FullPlayerView: View {
                     store.audio.seek(to: note.time)
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(timecode(note.time))
                         .font(.system(size: 10, weight: .heavy))
                         .foregroundStyle(.white.opacity(0.5))
@@ -216,26 +244,33 @@ struct FullPlayerView: View {
                             ForEach(note.tags, id: \.self) { tag in
                                 Text(tag)
                                     .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.4))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 1)
+                                    .foregroundStyle(.white.opacity(0.45))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
                                     .background(Color.white.opacity(0.07))
-                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
                         }
-                        .padding(.top, 1)
+                        .padding(.top, 2)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glassEffect(
                     .regular.interactive(),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
             }
             .buttonStyle(.plain)
             .padding(.trailing, 14)
+            .contextMenu {
+                Button(role: .destructive) {
+                    Task { await store.removeNote(note, from: project) }
+                } label: {
+                    Label("Delete note", systemImage: "trash")
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, waveformColumnWidth)

@@ -70,6 +70,11 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $store.presentingFullPlayer) {
             FullPlayerView(store: store)
         }
+        .task {
+            if DevHarness.autoOpenPlayer, let first = store.projects.first {
+                await store.play(first)
+            }
+        }
     }
 }
 
