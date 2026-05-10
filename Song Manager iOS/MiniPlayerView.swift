@@ -5,73 +5,58 @@ struct MiniPlayerView: View {
 
     var body: some View {
         if let project = store.audio.nowPlaying {
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    HStack(spacing: 12) {
-                        artwork(for: project)
-                            .frame(width: 42, height: 42)
-                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            HStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    artwork(for: project)
+                        .frame(width: 38, height: 38)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(project.displayTitle)
-                                .font(.subheadline.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(project.displayTitle)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if store.audio.duration > 0 {
+                            Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                                 .lineLimit(1)
-                            if store.audio.duration > 0 {
-                                Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
                         }
-                        Spacer(minLength: 0)
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        store.presentingFullPlayer = true
-                    }
-
-                    Button {
-                        store.audio.togglePlay()
-                    } label: {
-                        Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        store.audio.stop()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.footnote.weight(.semibold))
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    store.presentingFullPlayer = true
                 }
 
-                ScrubBar(progress: progress) { pct in
-                    store.audio.seek(to: pct * store.audio.duration)
-                }
+                Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.primary.opacity(0.10)))
+                    .contentShape(Circle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded { store.audio.togglePlay() }
+                    )
+
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded { store.audio.stop() }
+                    )
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.primary.opacity(0.07), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 14, y: 4)
+            .padding(.leading, 6)
+            .padding(.trailing, 4)
+            .padding(.vertical, 6)
+            .glassEffect(.clear, in: Capsule())
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
-    }
-
-    private var progress: Double {
-        guard store.audio.duration > 0 else { return 0 }
-        return min(1, max(0, store.audio.currentTime / store.audio.duration))
     }
 
     @ViewBuilder
@@ -93,37 +78,5 @@ struct MiniPlayerView: View {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let s = Int(seconds.rounded())
         return "\(s / 60):\(String(format: "%02d", s % 60))"
-    }
-}
-
-private struct ScrubBar: View {
-    var progress: Double
-    var onScrub: (Double) -> Void
-    @State private var dragProgress: Double? = nil
-
-    var body: some View {
-        GeometryReader { geo in
-            let displayProgress = dragProgress ?? progress
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.primary.opacity(0.12))
-                Capsule()
-                    .fill(Color.primary.opacity(0.7))
-                    .frame(width: max(0, geo.size.width * displayProgress))
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        dragProgress = max(0, min(1, value.location.x / geo.size.width))
-                    }
-                    .onEnded { value in
-                        let pct = max(0, min(1, value.location.x / geo.size.width))
-                        onScrub(pct)
-                        dragProgress = nil
-                    }
-            )
-        }
-        .frame(height: 3)
     }
 }

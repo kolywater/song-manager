@@ -10,7 +10,7 @@ struct AddNoteSheet: View {
     @State private var tags: Set<String> = []
     @FocusState private var textFocused: Bool
 
-    private let allTags = ["#arrangement", "#mix", "#lyrics", "#structure", "#vibe", "#drop", "#hook", "#vocal"]
+    private let allTags = ["arrangement", "chorus", "compression", "eq", "lyrics", "pc", "performance", "verse"]
 
     var body: some View {
         VStack(spacing: 0) {
