@@ -11,11 +11,13 @@ final class SongStore {
     var errorMessage: String?
     var isLoadingPicker = false
     var presentingFullPlayer: Bool = false
+    var notes: [UUID: [Note]] = [:]
     let audio = AudioService()
     let waveform = WaveformService()
 
     private let source: DropboxProjectSource?
     private var artInFlight: Set<UUID> = []
+    private var notesInFlight: Set<UUID> = []
 
     init() {
         let url = Self.defaultRegistryURL()
@@ -128,11 +130,58 @@ final class SongStore {
                 guard let self else { return }
                 await self.waveform.loadWaveform(for: project, audioURL: url)
             }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.loadNotes(for: project)
+            }
         } catch {
             errorMessage = error.localizedDescription
             audio.stop()
         }
     }
+
+    // MARK: - Notes
+
+    func loadNotes(for project: ProjectReference) async {
+        guard let source else { return }
+        if notesInFlight.contains(project.id) { return }
+        notesInFlight.insert(project.id)
+        defer { notesInFlight.remove(project.id) }
+
+        do {
+            let loaded = try await source.loadNotes(for: project)
+            notes[project.id] = loaded
+        } catch {
+            notes[project.id] = []
+        }
+    }
+
+    func addNote(_ note: Note, to project: ProjectReference) async {
+        guard let source else { return }
+        var current = notes[project.id] ?? []
+        current.append(note)
+        current.sort { $0.time < $1.time }
+        notes[project.id] = current
+        do {
+            try await source.saveNotes(current, for: project)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeNote(_ note: Note, from project: ProjectReference) async {
+        guard let source else { return }
+        var current = notes[project.id] ?? []
+        current.removeAll { $0.id == note.id }
+        notes[project.id] = current
+        do {
+            try await source.saveNotes(current, for: project)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Album art
 
     func loadAlbumArt(for project: ProjectReference) async {
         if albumArt[project.id] != nil { return }

@@ -108,6 +108,49 @@ final class DropboxProjectSource: ProjectSource {
         }
     }
 
+    // MARK: - Notes
+
+    private static let notesRootPath = "/music/aidenel songs/song notes"
+
+    func loadNotes(for project: ProjectReference) async throws -> [Note] {
+        let path = Self.notesPath(for: project)
+        do {
+            let data = try await downloadFile(path: path)
+            let doc = try JSONDecoder().decode(NotesDocument.self, from: data)
+            return doc.notes
+        } catch {
+            return []
+        }
+    }
+
+    func saveNotes(_ notes: [Note], for project: ProjectReference) async throws {
+        let path = Self.notesPath(for: project)
+        // App-level write scoping — refuse to write outside song notes/.
+        guard path.lowercased().hasPrefix(Self.notesRootPath.lowercased() + "/") else {
+            throw DropboxSourceError.api("Refused write outside song notes/: \(path)")
+        }
+        let doc = NotesDocument(notes: notes)
+        let data = try JSONEncoder().encode(doc)
+        try await uploadFile(path: path, data: data)
+    }
+
+    private static func notesPath(for project: ProjectReference) -> String {
+        "\(notesRootPath)/\(project.displayName).json"
+    }
+
+    private func uploadFile(path: String, data: Data) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            client.files.upload(path: path, mode: .overwrite, input: data).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    return
+                }
+                _ = response
+                continuation.resume(returning: ())
+            }
+        }
+    }
+
     private func listFolder(path: String) async throws -> [Files.Metadata] {
         try await withCheckedThrowingContinuation { continuation in
             client.files.listFolder(path: path).response { response, error in
