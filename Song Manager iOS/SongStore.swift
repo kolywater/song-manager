@@ -10,9 +10,9 @@ final class SongStore {
     var projects: [ProjectReference] = []
     var availableFolders: [FolderRef] = []
     var albumArt: [UUID: UIImage] = [:]
-    /// Average luminance of the album art (0 = black, 1 = white).
-    /// Used by SongCard to flip the pill's foreground between black/white.
-    var artLuminance: [UUID: Double] = [:]
+    // Luminance is computed alongside the tint color in summarize() but
+    // nothing reads it right now (pill text is uniformly white).
+    // var artLuminance: [UUID: Double] = [:]
     /// Average color of the album art. Used to tint the pill's glass
     /// material so it picks up the dominant hue of the artwork.
     var artTintColor: [UUID: Color] = [:]
@@ -56,7 +56,7 @@ final class SongStore {
 
     private func applyArtSummary(_ image: UIImage, projectID: UUID) {
         guard let summary = Self.summarize(image) else { return }
-        artLuminance[projectID] = summary.luminance
+        // artLuminance[projectID] = summary.luminance
         artTintColor[projectID] = summary.color
     }
 
@@ -134,7 +134,7 @@ final class SongStore {
         projects.removeAll { $0.id == project.id }
         source?.saveRegistry(projects)
         albumArt.removeValue(forKey: project.id)
-        artLuminance.removeValue(forKey: project.id)
+        // artLuminance.removeValue(forKey: project.id)
         artTintColor.removeValue(forKey: project.id)
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)

@@ -1,20 +1,38 @@
 import SwiftUI
 
+enum LibrarySortMode: String, CaseIterable, Identifiable {
+    case custom = "Custom"
+    case alphabetical = "A–Z"
+    var id: Self { self }
+}
+
 struct ContentView: View {
     @State private var store = SongStore()
     @State private var showAddSheet = false
+    @State private var sortMode: LibrarySortMode = .custom
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
 
+    private var sortedProjects: [ProjectReference] {
+        switch sortMode {
+        case .custom:
+            return store.projects
+        case .alphabetical:
+            return store.projects.sorted {
+                $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
+            }
+        }
+    }
+
     var body: some View {
         @Bindable var store = store
         NavigationStack {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(store.projects) { project in
+                    ForEach(sortedProjects) { project in
                         SongCard(project: project, store: store)
                             .onTapGesture {
                                 Task { await store.play(project) }
@@ -51,7 +69,17 @@ struct ContentView: View {
             }
             .navigationTitle("Adenel")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort", selection: $sortMode) {
+                            ForEach(LibrarySortMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.body.weight(.semibold))
+                    }
                     Button {
                         showAddSheet = true
                     } label: {
