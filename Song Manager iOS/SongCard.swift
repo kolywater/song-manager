@@ -5,19 +5,18 @@ struct SongCard: View {
     var store: SongStore
 
     var body: some View {
-        Button {
-            Task { await store.play(project) }
-        } label: {
-            Color.clear
-                .aspectRatio(1, contentMode: .fit)
-                .overlay { artLayer }
-                .overlay(alignment: .bottom) { pillOverlay }
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .task(id: project.id) {
-            await store.loadAlbumArt(for: project)
-        }
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { artLayer }
+            .overlay(alignment: .bottom) { pillOverlay }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .onTapGesture {
+                Task { await store.play(project) }
+            }
+            .task(id: project.id) {
+                await store.loadAlbumArt(for: project)
+            }
     }
 
     private var pillOverlay: some View {
@@ -38,16 +37,17 @@ struct SongCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button {
-                Task { await store.play(project, autoStart: true, showPlayer: false) }
-            } label: {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(fg)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(fg.opacity(0.22)))
-            }
-            .buttonStyle(.plain)
+            Image(systemName: "play.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(fg)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(fg.opacity(0.22)))
+                .contentShape(Circle())
+                .highPriorityGesture(
+                    TapGesture().onEnded {
+                        Task { await store.play(project, autoStart: true, showPlayer: false) }
+                    }
+                )
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)

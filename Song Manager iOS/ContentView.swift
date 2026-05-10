@@ -49,9 +49,6 @@ struct ContentView: View {
                                 } label: {
                                     Label("Remove from Library", systemImage: "trash")
                                 }
-                            } preview: {
-                                SongCard(project: project, store: store)
-                                    .frame(width: 240, height: 240)
                             }
                     }
                 }
