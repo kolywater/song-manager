@@ -100,9 +100,10 @@ final class SongStore {
         await loadAlbumArt(for: project)
     }
 
-    func play(_ project: ProjectReference) async {
-        // If this is the same song already playing, just open the full player.
+    func play(_ project: ProjectReference, autoStart: Bool = false) async {
+        // If this is the same song already loaded, just open the full player.
         if audio.nowPlaying?.id == project.id {
+            if autoStart && !audio.isPlaying { audio.resume() }
             presentingFullPlayer = true
             return
         }
@@ -125,7 +126,7 @@ final class SongStore {
             }
             // Bail if the user already moved on to a different project.
             guard audio.nowPlaying?.id == project.id else { return }
-            audio.play(url: url, project: project, artwork: albumArt[project.id])
+            audio.load(url: url, project: project, artwork: albumArt[project.id], autoStart: autoStart)
             Task { [weak self] in
                 guard let self else { return }
                 await self.waveform.loadWaveform(for: project, audioURL: url)

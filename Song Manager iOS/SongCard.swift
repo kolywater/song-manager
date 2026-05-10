@@ -15,24 +15,46 @@ struct SongCard: View {
                     endPoint: .bottom
                 )
             }
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let version = project.latestVersionString {
-                        Text(version.uppercased())
-                            .font(.caption2.weight(.heavy))
-                            .foregroundStyle(.white.opacity(0.75))
-                    }
-                    Text(project.displayName)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
-                .padding(10)
-            }
+            .overlay(alignment: .bottom) { pillOverlay }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .task(id: project.id) {
                 await store.loadAlbumArt(for: project)
             }
+    }
+
+    private var pillOverlay: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                if let version = project.latestVersionString {
+                    Text(version.uppercased())
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .tracking(0.5)
+                }
+                Text(project.displayName)
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                Task { await store.play(project, autoStart: true) }
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.white.opacity(0.22)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .glassEffect(.regular, in: Capsule())
+        .padding(8)
     }
 
     @ViewBuilder

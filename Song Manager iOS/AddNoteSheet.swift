@@ -47,31 +47,32 @@ struct AddNoteSheet: View {
                 }
                 .padding(.horizontal, 16)
 
-            FlowLayout(spacing: 6) {
+            FlowLayout(spacing: 8) {
                 ForEach(allTags, id: \.self) { tag in
                     let isSelected = tags.contains(tag)
                     Button {
                         if isSelected { tags.remove(tag) } else { tags.insert(tag) }
                     } label: {
                         Text(tag)
-                            .font(.system(size: 11, weight: .semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.4))
-                            .background(isSelected ? Color.white.opacity(0.12) : Color.clear)
+                            .font(.system(size: 14, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 9)
+                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
+                            .background(isSelected ? Color.white.opacity(0.16) : Color.clear)
                             .overlay(
                                 Capsule().stroke(
-                                    isSelected ? Color.white.opacity(0.4) : Color.white.opacity(0.1),
+                                    isSelected ? Color.white.opacity(0.5) : Color.white.opacity(0.18),
                                     lineWidth: 1
                                 )
                             )
                             .clipShape(Capsule())
+                            .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .padding(.top, 16)
 
             Spacer(minLength: 12)
 

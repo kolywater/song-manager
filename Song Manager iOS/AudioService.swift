@@ -40,7 +40,9 @@ final class AudioService {
         duration = 0
     }
 
-    func play(url: URL, project: ProjectReference, artwork: UIImage? = nil) {
+    /// Load a project's audio into the player. Starts paused at 0 by
+    /// default; pass `autoStart: true` to begin playing right away.
+    func load(url: URL, project: ProjectReference, artwork: UIImage? = nil, autoStart: Bool = false) {
         detachTimeObserver()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -53,7 +55,8 @@ final class AudioService {
         self.nowPlaying = project
         self.currentTime = 0
         self.duration = 0
-        self.isPlaying = true
+        self.isPlaying = autoStart
+        if autoStart { newPlayer.play() }
 
         attachTimeObserver()
         endObserver = NotificationCenter.default.addObserver(
@@ -74,7 +77,6 @@ final class AudioService {
             }
         }
 
-        newPlayer.play()
         updateNowPlayingInfo(artwork: artwork)
     }
 

@@ -65,23 +65,26 @@ struct FullPlayerView: View {
     // MARK: - Top bar
 
     private func topBar(project: ProjectReference) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.body.weight(.semibold))
-                    .frame(width: 36, height: 36)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .glassEffect(.regular.interactive(), in: Circle())
-            }
-            .buttonStyle(.plain)
-
+        ZStack {
             Text(project.displayName)
-                .font(.title3.weight(.heavy))
+                .font(.headline.weight(.heavy))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-            Spacer()
+                .padding(.horizontal, 60)
+
+            HStack {
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -224,46 +227,45 @@ struct FullPlayerView: View {
                 .fill(Color.white.opacity(0.25))
                 .frame(width: 18, height: 1)
                 .padding(.top, 11)
-            Button {
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(timecode(note.time))
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .tracking(0.4)
+                Text(note.text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
+                if !note.tags.isEmpty {
+                    FlowLayout(spacing: 4) {
+                        ForEach(note.tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.07))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(
+                .regular.interactive(),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
                 if duration > 0 {
                     store.audio.seek(to: note.time)
                 }
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(timecode(note.time))
-                        .font(.system(size: 10, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .tracking(0.4)
-                    Text(note.text)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white)
-                        .lineLimit(nil)
-                        .multilineTextAlignment(.leading)
-                    if !note.tags.isEmpty {
-                        FlowLayout(spacing: 4) {
-                            ForEach(note.tags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.45))
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
-                                    .background(Color.white.opacity(0.07))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                            }
-                        }
-                        .padding(.top, 2)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassEffect(
-                    .regular.interactive(),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
             }
-            .buttonStyle(.plain)
-            .padding(.trailing, 14)
             .contextMenu {
                 Button(role: .destructive) {
                     Task { await store.removeNote(note, from: project) }
@@ -271,6 +273,7 @@ struct FullPlayerView: View {
                     Label("Delete note", systemImage: "trash")
                 }
             }
+            .padding(.trailing, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, waveformColumnWidth)
