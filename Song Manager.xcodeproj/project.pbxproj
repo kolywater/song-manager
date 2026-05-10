@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		DFA878652F3BB13E00C2B393 /* appIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = DFA878642F3BB13E00C2B393 /* appIcon.icon */; };
 		DFAB003000000000000000A1 /* SwiftyDropbox in Frameworks */ = {isa = PBXBuildFile; productRef = DFAB002000000000000000A1 /* SwiftyDropbox */; };
+		DFAB004000000000000000A1 /* appIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = DFA878642F3BB13E00C2B393 /* appIcon.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -170,6 +171,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFAB004000000000000000A1 /* appIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -204,10 +206,11 @@
 		DF0E85402FB019BD00F73DEC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N8666MD6Y8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -238,10 +241,11 @@
 		DF0E85412FB019BD00F73DEC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N8666MD6Y8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
