@@ -21,6 +21,23 @@ final class AudioService {
         setupRemoteCommands()
     }
 
+    /// Show the player UI for a project before any audio is loaded.
+    /// Use this to open the full player immediately while a streaming
+    /// URL is being resolved.
+    func preparePlayback(for project: ProjectReference) {
+        detachTimeObserver()
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        player?.pause()
+        player = nil
+        nowPlaying = project
+        isPlaying = false
+        currentTime = 0
+        duration = 0
+    }
+
     func play(url: URL, project: ProjectReference, artwork: UIImage? = nil) {
         detachTimeObserver()
         if let endObserver {
@@ -101,10 +118,10 @@ final class AudioService {
 
     func seek(to seconds: Double) {
         guard let player else { return }
+        currentTime = seconds
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: target) { [weak self] _ in
             Task { @MainActor in
-                self?.currentTime = seconds
                 self?.updateNowPlayingInfo(artwork: nil, preserve: true)
             }
         }

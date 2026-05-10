@@ -16,13 +16,6 @@ struct ContentView: View {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(store.projects) { project in
                         SongCard(project: project, store: store)
-                            .overlay {
-                                if store.loadingPlaybackForProjectID == project.id {
-                                    Color.black.opacity(0.4)
-                                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                        .overlay { ProgressView().tint(.white) }
-                                }
-                            }
                             .onTapGesture {
                                 Task { await store.play(project) }
                             }

@@ -10,7 +10,6 @@ final class SongStore {
     var albumArt: [UUID: UIImage] = [:]
     var errorMessage: String?
     var isLoadingPicker = false
-    var loadingPlaybackForProjectID: UUID?
     var presentingFullPlayer: Bool = false
     let audio = AudioService()
     let waveform = WaveformService()
@@ -110,21 +109,28 @@ final class SongStore {
             return
         }
         guard case .dropboxPath(let folderPath) = project.location else { return }
-        loadingPlaybackForProjectID = project.id
-        defer { loadingPlaybackForProjectID = nil }
+
+        // Present the player immediately with project info; audio prepares
+        // in the background.
+        audio.preparePlayback(for: project)
+        presentingFullPlayer = true
+
         do {
             guard let url = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
                 errorMessage = "No bounces found in \(project.displayName)"
+                audio.stop()
                 return
             }
+            // Bail if the user already moved on to a different project.
+            guard audio.nowPlaying?.id == project.id else { return }
             audio.play(url: url, project: project, artwork: albumArt[project.id])
-            presentingFullPlayer = true
             Task { [weak self] in
                 guard let self else { return }
                 await self.waveform.loadWaveform(for: project, audioURL: url)
             }
         } catch {
             errorMessage = error.localizedDescription
+            audio.stop()
         }
     }
 
