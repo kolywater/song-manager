@@ -13,7 +13,7 @@ struct MiniPlayerView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(project.displayName)
+                            Text(project.displayTitle)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
                             if store.audio.duration > 0 {

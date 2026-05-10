@@ -25,7 +25,7 @@ struct SongCard: View {
                         .foregroundStyle(fg.opacity(0.75))
                         .tracking(0.5)
                 }
-                Text(project.displayName)
+                Text(project.displayTitle)
                     .font(.system(size: 13, weight: .heavy))
                     .foregroundStyle(fg)
                     .lineLimit(1)
@@ -47,7 +47,7 @@ struct SongCard: View {
         .padding(.leading, 12)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .glassEffect(.clear, in: Capsule())
+        .glassEffect(.regular, in: Capsule())
         .padding(8)
     }
 

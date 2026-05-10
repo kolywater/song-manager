@@ -66,7 +66,7 @@ struct FullPlayerView: View {
 
     private func topBar(project: ProjectReference) -> some View {
         ZStack {
-            Text(project.displayName)
+            Text(project.displayTitle)
                 .font(.headline.weight(.heavy))
                 .foregroundStyle(.white)
                 .lineLimit(1)

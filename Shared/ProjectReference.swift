@@ -24,6 +24,12 @@ struct ProjectReference: Identifiable, Codable, Equatable {
         self.location = location
     }
 
+    /// Word-cased title for display ("Burning Bridges" not "burning
+    /// bridges"). Preserves locale-appropriate capitalization.
+    var displayTitle: String {
+        displayName.localizedCapitalized
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, displayName, location, rootBookmark
         case latestVersionString, latestBounceFilename, albumArtFilename
