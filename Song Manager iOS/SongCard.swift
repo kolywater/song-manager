@@ -47,7 +47,7 @@ struct SongCard: View {
         .padding(.leading, 12)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: Capsule())
+        .glassEffect(.regular.tint(store.artTintColor[project.id]), in: Capsule())
         .padding(8)
     }
 
