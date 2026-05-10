@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum LibrarySortMode: String, CaseIterable, Identifiable {
-    case custom = "Custom"
+    case recent = "Recent"
     case alphabetical = "A–Z"
     var id: Self { self }
 }
@@ -9,7 +9,7 @@ enum LibrarySortMode: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var store = SongStore()
     @State private var showAddSheet = false
-    @State private var sortMode: LibrarySortMode = .custom
+    @State private var sortMode: LibrarySortMode = .recent
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -18,8 +18,12 @@ struct ContentView: View {
 
     private var sortedProjects: [ProjectReference] {
         switch sortMode {
-        case .custom:
-            return store.projects
+        case .recent:
+            return store.projects.sorted {
+                let a = store.activityDates[$0.id] ?? .distantPast
+                let b = store.activityDates[$1.id] ?? .distantPast
+                return a > b
+            }
         case .alphabetical:
             return store.projects.sorted {
                 $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending

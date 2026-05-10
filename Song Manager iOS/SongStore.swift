@@ -16,6 +16,9 @@ final class SongStore {
     /// Average color of the album art. Used to tint the pill's glass
     /// material so it picks up the dominant hue of the artwork.
     var artTintColor: [UUID: Color] = [:]
+    /// Most recent .als/bounce modification date per project. Drives
+    /// the "Recent" sort on the grid.
+    var activityDates: [UUID: Date] = [:]
     var errorMessage: String?
     var isLoadingPicker = false
     var presentingFullPlayer: Bool = false
@@ -36,6 +39,9 @@ final class SongStore {
             self.errorMessage = error.localizedDescription
         }
         loadFromDisk(at: url)
+        Task { [weak self] in
+            await self?.refreshActivityDates()
+        }
     }
 
     private static func defaultRegistryURL() -> URL {
@@ -128,6 +134,33 @@ final class SongStore {
         let project = ProjectReference(displayName: folder.displayName, location: folder.location)
         projects.append(project)
         source?.saveRegistry(projects)
+        Task { [weak self] in
+            await self?.refreshActivityDate(for: project)
+        }
+    }
+
+    func refreshActivityDates() async {
+        guard let source else { return }
+        await withTaskGroup(of: (UUID, Date?).self) { group in
+            for project in projects {
+                guard case .dropboxPath(let path) = project.location else { continue }
+                group.addTask {
+                    let date = try? await source.fetchLatestActivityDate(forFolderPath: path)
+                    return (project.id, date)
+                }
+            }
+            for await (id, date) in group {
+                if let date { activityDates[id] = date }
+            }
+        }
+    }
+
+    private func refreshActivityDate(for project: ProjectReference) async {
+        guard let source,
+              case .dropboxPath(let path) = project.location else { return }
+        if let date = try? await source.fetchLatestActivityDate(forFolderPath: path) {
+            activityDates[project.id] = date
+        }
     }
 
     func removeProject(_ project: ProjectReference) {
@@ -136,6 +169,7 @@ final class SongStore {
         albumArt.removeValue(forKey: project.id)
         // artLuminance.removeValue(forKey: project.id)
         artTintColor.removeValue(forKey: project.id)
+        activityDates.removeValue(forKey: project.id)
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)
     }

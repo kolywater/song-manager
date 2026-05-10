@@ -70,6 +70,40 @@ final class DropboxProjectSource: ProjectSource {
         return try await downloadFile(path: downloadPath)
     }
 
+    /// Returns the most recent clientModified date across the project's
+    /// .als files at the root and audio files in bounces/. Used to drive
+    /// the "Recent" sort on the grid.
+    func fetchLatestActivityDate(forFolderPath folderPath: String) async throws -> Date? {
+        var latest: Date?
+
+        if let rootEntries = try? await listFolder(path: folderPath) {
+            for entry in rootEntries {
+                guard let file = entry as? Files.FileMetadata else { continue }
+                let ext = (file.name as NSString).pathExtension.lowercased()
+                if ext == "als" {
+                    if latest == nil || file.clientModified > latest! {
+                        latest = file.clientModified
+                    }
+                }
+            }
+        }
+
+        if let bounceEntries = try? await listFolder(path: folderPath + "/bounces") {
+            let audioExts: Set<String> = ["wav", "mp3", "aif", "aiff", "flac", "m4a"]
+            for entry in bounceEntries {
+                guard let file = entry as? Files.FileMetadata else { continue }
+                let ext = (file.name as NSString).pathExtension.lowercased()
+                if audioExts.contains(ext) {
+                    if latest == nil || file.clientModified > latest! {
+                        latest = file.clientModified
+                    }
+                }
+            }
+        }
+
+        return latest
+    }
+
     func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> URL? {
         let bouncesPath = folderPath + "/bounces"
         let entries: [Files.Metadata]
