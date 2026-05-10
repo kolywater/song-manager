@@ -57,7 +57,7 @@ struct FullPlayerView: View {
     // MARK: - Waveform
 
     private func waveform(project: ProjectReference) -> some View {
-        let bars = makeFakeWaveform(seed: seed(for: project), count: 100)
+        let bars = waveformBars(for: project)
         return GeometryReader { geo in
             let totalH = geo.size.height
             let barH = totalH / CGFloat(bars.count)
@@ -102,6 +102,13 @@ struct FullPlayerView: View {
     private func barColor(played: Bool, isHead: Bool) -> Color {
         if isHead { return .white }
         return played ? Color.white.opacity(0.85) : Color.white.opacity(0.18)
+    }
+
+    private func waveformBars(for project: ProjectReference) -> [Double] {
+        if let real = store.waveform.waveforms[project.id] {
+            return real.map(Double.init)
+        }
+        return makeFakeWaveform(seed: seed(for: project), count: WaveformService.barCount)
     }
 
     private var playbackProgress: Double {

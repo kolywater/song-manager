@@ -13,6 +13,7 @@ final class SongStore {
     var loadingPlaybackForProjectID: UUID?
     var presentingFullPlayer: Bool = false
     let audio = AudioService()
+    let waveform = WaveformService()
 
     private let source: DropboxProjectSource?
     private var artInFlight: Set<UUID> = []
@@ -89,6 +90,7 @@ final class SongStore {
         source?.saveRegistry(projects)
         albumArt.removeValue(forKey: project.id)
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
+        waveform.invalidate(for: project.id)
     }
 
     func refreshAlbumArt(for project: ProjectReference) async {
@@ -117,6 +119,10 @@ final class SongStore {
             }
             audio.play(url: url, project: project, artwork: albumArt[project.id])
             presentingFullPlayer = true
+            Task { [weak self] in
+                guard let self else { return }
+                await self.waveform.loadWaveform(for: project, audioURL: url)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
