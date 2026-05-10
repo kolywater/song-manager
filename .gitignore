@@ -14,3 +14,6 @@ Songs/
 
 # App icon source
 appIcon.icon/
+
+# Secrets — Dropbox token lives here, never commit
+Song Manager iOS/DropboxConfig.swift

@@ -1,0 +1,15 @@
+{
+  "originHash" : "257efd880b28904e25da18532e13aa3705869311399dd12a16c4ba48b6d6a49d",
+  "pins" : [
+    {
+      "identity" : "swiftydropbox",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/dropbox/SwiftyDropbox.git",
+      "state" : {
+        "revision" : "e315e0b14edb83f022134aef389deb4e8bee6bbf",
+        "version" : "10.2.4"
+      }
+    }
+  ],
+  "version" : 3
+}

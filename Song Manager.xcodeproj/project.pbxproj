@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		DFA878652F3BB13E00C2B393 /* appIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = DFA878642F3BB13E00C2B393 /* appIcon.icon */; };
+		DFAB003000000000000000A1 /* SwiftyDropbox in Frameworks */ = {isa = PBXBuildFile; productRef = DFAB002000000000000000A1 /* SwiftyDropbox */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFAB003000000000000000A1 /* SwiftyDropbox in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -93,6 +95,7 @@
 			);
 			name = "Song Manager iOS";
 			packageProductDependencies = (
+				DFAB002000000000000000A1 /* SwiftyDropbox */,
 			);
 			productName = "Song Manager iOS";
 			productReference = DF0E85382FB019BC00F73DEC /* Song Manager iOS.app */;
@@ -148,6 +151,9 @@
 			);
 			mainGroup = DF4530282F397EA900DEF077;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DFAB001000000000000000A1 /* XCRemoteSwiftPackageReference "SwiftyDropbox" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DF4530322F397EA900DEF077 /* Products */;
 			projectDirPath = "";
@@ -483,6 +489,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DFAB001000000000000000A1 /* XCRemoteSwiftPackageReference "SwiftyDropbox" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/dropbox/SwiftyDropbox.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DFAB002000000000000000A1 /* SwiftyDropbox */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DFAB001000000000000000A1 /* XCRemoteSwiftPackageReference "SwiftyDropbox" */;
+			productName = SwiftyDropbox;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = DF4530292F397EA900DEF077 /* Project object */;
 }
