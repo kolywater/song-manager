@@ -2,10 +2,11 @@ import SwiftUI
 
 struct SongCard: View {
     let project: ProjectReference
+    var store: SongStore
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            placeholderArt
+            artLayer
             LinearGradient(
                 colors: [.clear, .black.opacity(0.55)],
                 startPoint: .center,
@@ -26,6 +27,20 @@ struct SongCard: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .task(id: project.id) {
+            await store.loadAlbumArt(for: project)
+        }
+    }
+
+    @ViewBuilder
+    private var artLayer: some View {
+        if let image = store.albumArt[project.id] {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            placeholderArt
+        }
     }
 
     private var placeholderArt: some View {
@@ -46,7 +61,6 @@ struct SongCard: View {
 
     private var hue: Double {
         if let h = project.gradientHue { return h }
-        // Stable hash → hue in [0, 1)
         let h = abs(project.id.uuidString.hashValue) % 360
         return Double(h) / 360.0
     }

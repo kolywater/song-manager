@@ -14,13 +14,16 @@ struct ContentView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(store.projects) { project in
-                        SongCard(project: project)
+                        SongCard(project: project, store: store)
                             .contextMenu {
                                 Button(role: .destructive) {
                                     store.removeProject(project)
                                 } label: {
-                                    Label("Remove", systemImage: "trash")
+                                    Label("Remove from Library", systemImage: "trash")
                                 }
+                            } preview: {
+                                SongCard(project: project, store: store)
+                                    .frame(width: 240, height: 240)
                             }
                     }
                 }

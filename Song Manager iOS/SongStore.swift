@@ -1,15 +1,18 @@
 import Foundation
 import Observation
+import UIKit
 
 @MainActor
 @Observable
 final class SongStore {
     var projects: [ProjectReference] = []
     var availableFolders: [FolderRef] = []
+    var albumArt: [UUID: UIImage] = [:]
     var errorMessage: String?
     var isLoadingPicker = false
 
     private let source: DropboxProjectSource?
+    private var artInFlight: Set<UUID> = []
 
     init() {
         let url = Self.defaultRegistryURL()
@@ -25,6 +28,17 @@ final class SongStore {
     private static func defaultRegistryURL() -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docs.appending(path: "iosProjects.json")
+    }
+
+    private static func albumArtCacheDir() -> URL {
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let dir = cache.appending(path: "AlbumArt")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func albumArtCacheURL(for id: UUID) -> URL {
+        albumArtCacheDir().appending(path: "\(id.uuidString).bin")
     }
 
     private func loadFromDisk(at url: URL) {
@@ -70,5 +84,35 @@ final class SongStore {
     func removeProject(_ project: ProjectReference) {
         projects.removeAll { $0.id == project.id }
         source?.saveRegistry(projects)
+        albumArt.removeValue(forKey: project.id)
+        try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
+    }
+
+    func loadAlbumArt(for project: ProjectReference) async {
+        if albumArt[project.id] != nil { return }
+        if artInFlight.contains(project.id) { return }
+
+        // Try disk cache first.
+        let cacheURL = Self.albumArtCacheURL(for: project.id)
+        if let data = try? Data(contentsOf: cacheURL),
+           let image = UIImage(data: data) {
+            albumArt[project.id] = image
+            return
+        }
+
+        guard let source,
+              case .dropboxPath(let folderPath) = project.location else { return }
+
+        artInFlight.insert(project.id)
+        defer { artInFlight.remove(project.id) }
+
+        do {
+            guard let data = try await source.fetchAlbumArt(forFolderPath: folderPath),
+                  let image = UIImage(data: data) else { return }
+            try? data.write(to: cacheURL, options: .atomic)
+            albumArt[project.id] = image
+        } catch {
+            // Silent — placeholder remains visible.
+        }
     }
 }

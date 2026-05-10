@@ -40,6 +40,57 @@ final class DropboxProjectSource: ProjectSource {
         try? data.write(to: storageURL, options: .atomic)
     }
 
+    func fetchAlbumArt(forFolderPath folderPath: String) async throws -> Data? {
+        let artFolderPath = folderPath + "/_ALBUM ART"
+        let entries: [Files.Metadata]
+        do {
+            entries = try await listFolder(path: artFolderPath)
+        } catch {
+            // Missing _ALBUM ART folder is fine — no art.
+            return nil
+        }
+
+        let imageExts: Set<String> = ["png", "jpg", "jpeg", "tiff", "webp"]
+        let images = entries.compactMap { entry -> Files.FileMetadata? in
+            guard let file = entry as? Files.FileMetadata else { return nil }
+            let ext = (file.name as NSString).pathExtension.lowercased()
+            return imageExts.contains(ext) ? file : nil
+        }
+        .sorted { $0.serverModified > $1.serverModified }
+
+        guard let latest = images.first else { return nil }
+        let downloadPath = latest.pathLower ?? (artFolderPath + "/" + latest.name)
+        return try await downloadFile(path: downloadPath)
+    }
+
+    private func listFolder(path: String) async throws -> [Files.Metadata] {
+        try await withCheckedThrowingContinuation { continuation in
+            client.files.listFolder(path: path).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    return
+                }
+                continuation.resume(returning: response?.entries ?? [])
+            }
+        }
+    }
+
+    private func downloadFile(path: String) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            client.files.download(path: path).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    return
+                }
+                guard let response else {
+                    continuation.resume(throwing: DropboxSourceError.api("Empty download response"))
+                    return
+                }
+                continuation.resume(returning: response.1)
+            }
+        }
+    }
+
     func listAvailableFolders() async throws -> [FolderRef] {
         try await withCheckedThrowingContinuation { continuation in
             client.files.listFolder(path: rootPath).response { response, error in
