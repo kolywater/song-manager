@@ -8,13 +8,6 @@ struct SongCard: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay { artLayer }
-            .overlay {
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.55)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-            }
             .overlay(alignment: .bottom) { pillOverlay }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .task(id: project.id) {
@@ -23,17 +16,18 @@ struct SongCard: View {
     }
 
     private var pillOverlay: some View {
-        HStack(spacing: 6) {
+        let fg = pillForeground
+        return HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 if let version = project.latestVersionString {
                     Text(version.uppercased())
                         .font(.system(size: 10, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(fg.opacity(0.75))
                         .tracking(0.5)
                 }
                 Text(project.displayName)
                     .font(.system(size: 13, weight: .heavy))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -44,17 +38,23 @@ struct SongCard: View {
             } label: {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(fg)
                     .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.white.opacity(0.22)))
+                    .background(Circle().fill(fg.opacity(0.22)))
             }
             .buttonStyle(.plain)
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: Capsule())
+        .glassEffect(.clear, in: Capsule())
         .padding(8)
+    }
+
+    /// Black if the artwork's bottom strip is light; white otherwise.
+    private var pillForeground: Color {
+        let lum = store.artBottomLuminance[project.id] ?? 0
+        return lum > 0.6 ? .black : .white
     }
 
     @ViewBuilder
