@@ -40,7 +40,7 @@ final class DropboxProjectSource: ProjectSource {
         try? data.write(to: storageURL, options: .atomic)
     }
 
-    func fetchAlbumArt(forFolderPath folderPath: String) async throws -> Data? {
+    func fetchAlbumArt(forFolderPath folderPath: String, songName: String) async throws -> Data? {
         let artFolderPath = folderPath + "/_ALBUM ART"
         let entries: [Files.Metadata]
         do {
@@ -56,10 +56,17 @@ final class DropboxProjectSource: ProjectSource {
             let ext = (file.name as NSString).pathExtension.lowercased()
             return imageExts.contains(ext) ? file : nil
         }
-        .sorted { $0.serverModified > $1.serverModified }
 
-        guard let latest = images.first else { return nil }
-        let downloadPath = latest.pathLower ?? (artFolderPath + "/" + latest.name)
+        // Prefer the official "<song name> album art.<ext>" if it exists.
+        let officialStem = "\(songName) album art".lowercased()
+        let official = images.first { file in
+            let stem = (file.name as NSString).deletingPathExtension.lowercased()
+            return stem == officialStem
+        }
+        let chosen = official ?? images.sorted { $0.serverModified > $1.serverModified }.first
+        guard let chosen else { return nil }
+
+        let downloadPath = chosen.pathLower ?? (artFolderPath + "/" + chosen.name)
         return try await downloadFile(path: downloadPath)
     }
 

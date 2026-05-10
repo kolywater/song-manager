@@ -107,7 +107,7 @@ final class SongStore {
         defer { artInFlight.remove(project.id) }
 
         do {
-            guard let data = try await source.fetchAlbumArt(forFolderPath: folderPath),
+            guard let data = try await source.fetchAlbumArt(forFolderPath: folderPath, songName: project.displayName),
                   let image = UIImage(data: data) else { return }
             try? data.write(to: cacheURL, options: .atomic)
             albumArt[project.id] = image

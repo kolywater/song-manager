@@ -5,31 +5,34 @@ struct SongCard: View {
     var store: SongStore
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            artLayer
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.55)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-            VStack(alignment: .leading, spacing: 2) {
-                if let version = project.latestVersionString {
-                    Text(version.uppercased())
-                        .font(.caption2.weight(.heavy))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-                Text(project.displayName)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { artLayer }
+            .overlay {
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.55)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
             }
-            .padding(10)
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .task(id: project.id) {
-            await store.loadAlbumArt(for: project)
-        }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let version = project.latestVersionString {
+                        Text(version.uppercased())
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    Text(project.displayName)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                .padding(10)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .task(id: project.id) {
+                await store.loadAlbumArt(for: project)
+            }
     }
 
     @ViewBuilder
@@ -61,8 +64,8 @@ struct SongCard: View {
 
     private var hue: Double {
         if let h = project.gradientHue { return h }
-        let h = abs(project.id.uuidString.hashValue) % 360
-        return Double(h) / 360.0
+        // Stable across launches — UUID's first byte. (hashValue is randomized.)
+        return Double(project.id.uuid.0) / 256.0
     }
 
     private var initial: String {
