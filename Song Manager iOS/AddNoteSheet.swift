@@ -10,16 +10,7 @@ struct AddNoteSheet: View {
     @State private var tags: Set<String> = []
     @FocusState private var textFocused: Bool
 
-    private struct TagCategory {
-        let name: String
-        let tags: [String]
-    }
-
-    private let categories: [TagCategory] = [
-        TagCategory(name: "Instrument", tags: ["bass", "strings", "sub", "vox", "drums", "synth", "keys"]),
-        TagCategory(name: "Mixing", tags: ["eq", "compression", "volume", "saturation", "reverb/delay"]),
-        TagCategory(name: "Structure", tags: ["arrangement", "outro", "intro", "verse", "pc", "chorus", "bridge"])
-    ]
+    private let categories: [NoteTagCategory] = NoteTags.categories
 
     var body: some View {
         VStack(spacing: 0) {

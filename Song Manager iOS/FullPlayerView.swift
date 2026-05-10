@@ -5,11 +5,17 @@ struct FullPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrubProgress: Double? = nil
     @State private var showAddNote: Bool = false
+    @State private var speech = SpeechRecognitionService()
+    @State private var voiceNoteStartTime: Double = 0
     /// Suppresses auto-scroll while the user is interacting with the
     /// scroll view (and for a grace period after they let go), so manual
     /// scrolling isn't fought by the playback follow-along.
     @State private var userScrolling: Bool = false
     @State private var resumeAutoScroll: Task<Void, Never>?
+
+    /// -10/+10 skip buttons are hidden for now in favor of the voice-note
+    /// flow. Kept in the source so it's a one-line flip to bring them back.
+    private let showSkipButtons: Bool = false
 
     private let waveformColumnWidth: CGFloat = 56
     /// Vertical pixels per waveform sample — smaller = denser silhouette.
@@ -29,10 +35,20 @@ struct FullPlayerView: View {
                     timeDisplay
                         .padding(.horizontal, 20)
                         .padding(.bottom, 6)
-                    transport
+                    if speech.isRecording {
+                        HStack {
+                            Spacer()
+                            transcriptBubble
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 10)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                    transport(project: project)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 28)
                 }
+                .animation(.easeInOut(duration: 0.2), value: speech.isRecording)
                 .sheet(isPresented: $showAddNote) {
                     AddNoteSheet(
                         project: project,
@@ -401,18 +417,38 @@ struct FullPlayerView: View {
         .monospacedDigit()
     }
 
-    private var transport: some View {
+    @ViewBuilder
+    private func transport(project: ProjectReference) -> some View {
+        if speech.isRecording {
+            recordingTransport(project: project)
+        } else {
+            idleTransport
+        }
+    }
+
+    private var idleTransport: some View {
+        ZStack {
+            playPauseButton
+            HStack {
+                loopButton
+                if showSkipButtons {
+                    skipButton(seconds: -10, systemImage: "gobackward.10")
+                }
+                Spacer()
+                if showSkipButtons {
+                    skipButton(seconds: 10, systemImage: "goforward.10")
+                }
+                voiceAndAddCombo
+            }
+        }
+    }
+
+    private func recordingTransport(project: ProjectReference) -> some View {
         HStack {
             Spacer()
-            loopButton
+            cancelRecordingButton
             Spacer()
-            skipButton(seconds: -10, systemImage: "gobackward.10")
-            Spacer()
-            playPauseButton
-            Spacer()
-            skipButton(seconds: 10, systemImage: "goforward.10")
-            Spacer()
-            addNoteButton
+            recordingMicButton(project: project)
             Spacer()
         }
     }
@@ -422,9 +458,9 @@ struct FullPlayerView: View {
             store.audio.toggleLoop()
         } label: {
             Image(systemName: "repeat")
-                .font(.title3)
+                .font(.title2)
                 .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.5))
-                .frame(width: 44, height: 44)
+                .frame(width: 52, height: 52)
                 .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
@@ -456,18 +492,116 @@ struct FullPlayerView: View {
         .buttonStyle(.plain)
     }
 
-    private var addNoteButton: some View {
+    /// Mic + plus rendered as a single glass capsule, mirroring the
+    /// home-screen toolbar combo. Each side is its own tap target.
+    private var voiceAndAddCombo: some View {
+        HStack(spacing: 0) {
+            Button {
+                startRecording()
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 60, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 0.5, height: 28)
+
+            Button {
+                store.audio.pause()
+                showAddNote = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 60, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .glassEffect(.regular.interactive(), in: Capsule())
+    }
+
+    // MARK: - Voice note
+
+    private func recordingMicButton(project: ProjectReference) -> some View {
         Button {
-            store.audio.pause()
-            showAddNote = true
+            finishRecording(project: project)
         } label: {
-            Image(systemName: "plus")
+            Image(systemName: "stop.fill")
                 .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(Circle().fill(Color.red))
+                .symbolEffect(.pulse, options: .repeating, isActive: speech.isRecording)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var cancelRecordingButton: some View {
+        Button {
+            cancelRecording()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.title3)
                 .foregroundStyle(.white.opacity(0.85))
-                .frame(width: 44, height: 44)
+                .frame(width: 52, height: 52)
                 .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var transcriptBubble: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 8, height: 8)
+                .padding(.top, 6)
+                .symbolEffect(.pulse, options: .repeating, isActive: speech.isRecording)
+            Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript)
+                .font(.system(size: 14))
+                .foregroundStyle(speech.transcript.isEmpty ? .white.opacity(0.5) : .white)
+                .multilineTextAlignment(.leading)
+                .lineLimit(5)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 280, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func startRecording() {
+        Task { @MainActor in
+            let granted = await speech.requestPermissions()
+            guard granted else {
+                store.audio.pause()
+                showAddNote = true
+                return
+            }
+            store.audio.pause()
+            voiceNoteStartTime = store.audio.currentTime
+            do {
+                try speech.start()
+            } catch {
+                showAddNote = true
+            }
+        }
+    }
+
+    private func finishRecording(project: ProjectReference) {
+        let text = speech.stop()
+        guard !text.isEmpty else { return }
+        let tags = NoteTags.matches(in: text)
+        let note = Note(time: voiceNoteStartTime, text: text, tags: tags)
+        Task { await store.addNote(note, to: project) }
+    }
+
+    private func cancelRecording() {
+        speech.cancel()
     }
 
     // MARK: - Helpers
