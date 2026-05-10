@@ -15,6 +15,7 @@ final class AudioService {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var isSeeking: Bool = false
 
     init() {
         configureSession()
@@ -118,11 +119,14 @@ final class AudioService {
 
     func seek(to seconds: Double) {
         guard let player else { return }
+        isSeeking = true
         currentTime = seconds
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: target) { [weak self] _ in
             Task { @MainActor in
-                self?.updateNowPlayingInfo(artwork: nil, preserve: true)
+                guard let self else { return }
+                self.isSeeking = false
+                self.updateNowPlayingInfo(artwork: nil, preserve: true)
             }
         }
     }
@@ -143,6 +147,7 @@ final class AudioService {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self else { return }
+            if self.isSeeking { return }
             let seconds = time.seconds
             if seconds.isFinite {
                 self.currentTime = seconds
