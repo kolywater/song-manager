@@ -32,26 +32,25 @@ struct MiniPlayerView: View {
                 }
 
                 Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.primary.opacity(0.10)))
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
                     .contentShape(Circle())
                     .highPriorityGesture(
                         TapGesture().onEnded { store.audio.togglePlay() }
                     )
 
                 Image(systemName: "xmark")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
                     .contentShape(Circle())
                     .highPriorityGesture(
                         TapGesture().onEnded { store.audio.stop() }
                     )
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 4)
+            .padding(.leading, 24)
+            .padding(.trailing, 16)
             .padding(.vertical, 6)
             .glassEffect(.clear, in: Capsule())
             .padding(.horizontal, 12)
