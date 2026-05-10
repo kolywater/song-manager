@@ -105,7 +105,7 @@ final class ProjectStore {
 
         if let registry = try? JSONDecoder().decode(ProjectRegistry.self, from: data) {
             projects = registry.entries.map { entry in
-                ProjectReference(id: entry.id, displayName: "", rootBookmark: entry.rootBookmark)
+                ProjectReference(id: entry.id, displayName: "", location: entry.location)
             }
             for i in projects.indices {
                 rescanProject(at: i)
@@ -149,7 +149,7 @@ final class ProjectStore {
     }
 
     private func saveRegistry() {
-        let entries = projects.map { ProjectRegistry.Entry(id: $0.id, rootBookmark: $0.rootBookmark) }
+        let entries = projects.map { ProjectRegistry.Entry(id: $0.id, location: $0.location) }
         let registry = ProjectRegistry(entries: entries)
         guard let data = try? JSONEncoder().encode(registry) else { return }
         try? data.write(to: storageURL, options: .atomic)
@@ -176,7 +176,7 @@ final class ProjectStore {
         }
 
         let name = url.lastPathComponent
-        var project = ProjectReference(displayName: name, rootBookmark: bookmark)
+        var project = ProjectReference(displayName: name, location: .localBookmark(bookmark))
 
         if url.startAccessingSecurityScopedResource() {
             defer { url.stopAccessingSecurityScopedResource() }
@@ -201,9 +201,10 @@ final class ProjectStore {
     // MARK: - Bookmark Resolution
 
     func resolveBookmark(for project: ProjectReference) -> URL? {
+        guard case .localBookmark(let bookmark) = project.location else { return nil }
         var isStale = false
         guard let url = try? URL(
-            resolvingBookmarkData: project.rootBookmark,
+            resolvingBookmarkData: bookmark,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
@@ -215,7 +216,7 @@ final class ProjectStore {
             relativeTo: nil
         ) {
             if let idx = projects.firstIndex(where: { $0.id == project.id }) {
-                projects[idx].rootBookmark = newBookmark
+                projects[idx].location = .localBookmark(newBookmark)
                 saveRegistry()
             }
         }
@@ -300,7 +301,12 @@ final class ProjectStore {
         guard url.startAccessingSecurityScopedResource() else { return "" }
         defer { url.stopAccessingSecurityScopedResource() }
         let notesURL = url.appending(path: notesFilename)
-        return (try? String(contentsOf: notesURL, encoding: .utf8)) ?? ""
+        var content = ""
+        var error: NSError?
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: notesURL, options: [], error: &error) { u in
+            content = (try? String(contentsOf: u, encoding: .utf8)) ?? ""
+        }
+        return content
     }
 
     func saveNotes(for project: ProjectReference, text: String) {
@@ -308,7 +314,15 @@ final class ProjectStore {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
         let notesURL = url.appending(path: notesFilename)
-        try? text.write(to: notesURL, atomically: true, encoding: .utf8)
+        var error: NSError?
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: notesURL, options: .forReplacing, error: &error) { u in
+            try? text.write(to: u, atomically: true, encoding: .utf8)
+        }
+    }
+
+    func notesFileInfo(for project: ProjectReference) -> (rootURL: URL, notesURL: URL)? {
+        guard let url = resolveBookmark(for: project) else { return nil }
+        return (url, url.appending(path: notesFilename))
     }
 
     func setAlbumArt(for project: ProjectReference, imageURL: URL) {
