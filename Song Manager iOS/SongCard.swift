@@ -9,6 +9,7 @@ struct SongCard: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay { artLayer }
             .overlay(alignment: .topLeading) { titleOverlay }
+            .overlay(alignment: .topTrailing) { starOverlay }
             .overlay(alignment: .bottomTrailing) { playButtonOverlay }
             // .overlay(alignment: .bottom) { pillOverlay }  // hidden — replaced by titleOverlay + playButtonOverlay
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -80,9 +81,22 @@ struct SongCard: View {
         project.displayName.lowercased().contains("burning bridges") ? .black : .white
     }
 
+    @ViewBuilder
+    private var starOverlay: some View {
+        if store.starred[project.id] == true {
+            Image(systemName: "star.fill")
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(Color.yellow)
+                .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 1)
+                .padding(.top, 18)
+                .padding(.trailing, 16)
+                .allowsHitTesting(false)
+        }
+    }
+
     private var titleOverlay: some View {
         Text(project.displayTitle)
-            .font(.system(size: 28, weight: .heavy))
+            .font(.system(size: 22, weight: .heavy))
             .foregroundStyle(.white)
             .lineLimit(3)
             .multilineTextAlignment(.leading)

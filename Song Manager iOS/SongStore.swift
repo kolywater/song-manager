@@ -24,6 +24,7 @@ final class SongStore {
     var isLoadingPicker = false
     var presentingFullPlayer: Bool = false
     var notes: [UUID: [Note]] = [:]
+    var starred: [UUID: Bool] = [:]
     let audio = AudioService()
     let waveform = WaveformService()
 
@@ -56,6 +57,7 @@ final class SongStore {
         }
         loadFromDisk(at: url)
         activityDates = Self.loadActivityDatesFromDisk()
+        starred = Self.loadStarredFromDisk()
         if source != nil {
             Task { [weak self] in
                 await self?.refreshActivityDates()
@@ -82,6 +84,32 @@ final class SongStore {
     private static func defaultRegistryURL() -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docs.appending(path: "iosProjects.json")
+    }
+
+    private static func starredCacheURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appending(path: "iosStarred.json")
+    }
+
+    /// Local-only cache of starred state, keyed by project UUID. The
+    /// canonical store is the per-song NotesDocument on Dropbox; this
+    /// mirror keeps the home grid able to sort starred-first without
+    /// fetching every song's doc on launch.
+    private static func loadStarredFromDisk() -> [UUID: Bool] {
+        guard let data = try? Data(contentsOf: starredCacheURL()),
+              let dict = try? JSONDecoder().decode([String: Bool].self, from: data)
+        else { return [:] }
+        var out: [UUID: Bool] = [:]
+        for (key, value) in dict {
+            if let id = UUID(uuidString: key) { out[id] = value }
+        }
+        return out
+    }
+
+    private func saveStarredToDisk() {
+        let dict = Dictionary(uniqueKeysWithValues: starred.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(dict) else { return }
+        try? data.write(to: Self.starredCacheURL(), options: .atomic)
     }
 
     private static func albumArtCacheDir() -> URL {
@@ -263,7 +291,7 @@ final class SongStore {
         if showPlayer { presentingFullPlayer = true }
 
         do {
-            guard let url = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
+            guard let bounce = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
                 errorMessage = "No bounces found in \(project.displayName)"
                 audio.stop()
                 presentingFullPlayer = false
@@ -271,10 +299,10 @@ final class SongStore {
             }
             // Bail if the user already moved on to a different project.
             guard audio.nowPlaying?.id == project.id else { return }
-            audio.load(url: url, project: project, artwork: albumArt[project.id], autoStart: autoStart)
+            audio.load(url: bounce.url, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
             Task { [weak self] in
                 guard let self else { return }
-                await self.waveform.loadWaveform(for: project, audioURL: url)
+                await self.waveform.loadWaveform(for: project, audioURL: bounce.url)
             }
             Task { [weak self] in
                 guard let self else { return }
@@ -296,8 +324,12 @@ final class SongStore {
         defer { notesInFlight.remove(project.id) }
 
         do {
-            let loaded = try await source.loadNotes(for: project)
-            notes[project.id] = loaded
+            let doc = try await source.loadNotes(for: project)
+            notes[project.id] = doc.notes
+            if starred[project.id] != doc.starred {
+                starred[project.id] = doc.starred
+                saveStarredToDisk()
+            }
         } catch {
             notes[project.id] = []
         }
@@ -305,15 +337,15 @@ final class SongStore {
 
     func addNote(_ note: Note, to project: ProjectReference) async {
         guard let source else { return }
+        var stamped = note
+        if stamped.version == nil {
+            stamped.version = audio.currentVersion
+        }
         var current = notes[project.id] ?? []
-        current.append(note)
+        current.append(stamped)
         current.sort { $0.time < $1.time }
         notes[project.id] = current
-        do {
-            try await source.saveNotes(current, for: project)
-        } catch {
-            handleDropboxError(error)
-        }
+        await persistDoc(for: project, source: source)
     }
 
     func removeNote(_ note: Note, from project: ProjectReference) async {
@@ -321,8 +353,23 @@ final class SongStore {
         var current = notes[project.id] ?? []
         current.removeAll { $0.id == note.id }
         notes[project.id] = current
+        await persistDoc(for: project, source: source)
+    }
+
+    func toggleStarred(_ project: ProjectReference) async {
+        starred[project.id] = !(starred[project.id] ?? false)
+        saveStarredToDisk()
+        guard let source else { return }
+        await persistDoc(for: project, source: source)
+    }
+
+    private func persistDoc(for project: ProjectReference, source: DropboxProjectSource) async {
+        let doc = NotesDocument(
+            notes: notes[project.id] ?? [],
+            starred: starred[project.id] ?? false
+        )
         do {
-            try await source.saveNotes(current, for: project)
+            try await source.saveNotes(doc, for: project)
         } catch {
             handleDropboxError(error)
         }

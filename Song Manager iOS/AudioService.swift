@@ -8,10 +8,19 @@ import UIKit
 @Observable
 final class AudioService {
     var nowPlaying: ProjectReference?
+    var currentTrackFilename: String?
     var isPlaying: Bool = false
     var isLooping: Bool = false
     var currentTime: Double = 0
     var duration: Double = 0
+
+    /// Parsed version of the currently loaded bounce (e.g. [1, 3]),
+    /// or nil if the filename hasn't been set or has no version suffix.
+    var currentVersion: [Int]? {
+        guard let filename = currentTrackFilename else { return nil }
+        let stem = (filename as NSString).deletingPathExtension
+        return VersionService.parseVersion(fromStem: stem)
+    }
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -36,6 +45,7 @@ final class AudioService {
         player?.pause()
         player = nil
         nowPlaying = project
+        currentTrackFilename = nil
         isPlaying = false
         currentTime = 0
         duration = 0
@@ -43,7 +53,7 @@ final class AudioService {
 
     /// Load a project's audio into the player. Starts paused at 0 by
     /// default; pass `autoStart: true` to begin playing right away.
-    func load(url: URL, project: ProjectReference, artwork: UIImage? = nil, autoStart: Bool = false) {
+    func load(url: URL, project: ProjectReference, filename: String? = nil, artwork: UIImage? = nil, autoStart: Bool = false) {
         detachTimeObserver()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -54,6 +64,7 @@ final class AudioService {
         let newPlayer = AVPlayer(playerItem: item)
         self.player = newPlayer
         self.nowPlaying = project
+        self.currentTrackFilename = filename
         self.currentTime = 0
         self.duration = 0
         self.isPlaying = autoStart
@@ -110,6 +121,7 @@ final class AudioService {
         detachTimeObserver()
         player = nil
         nowPlaying = nil
+        currentTrackFilename = nil
         isPlaying = false
         currentTime = 0
         duration = 0

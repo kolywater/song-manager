@@ -17,18 +17,23 @@ struct ContentView: View {
     ]
 
     private var sortedProjects: [ProjectReference] {
+        let base: [ProjectReference]
         switch sortMode {
         case .recent:
-            return store.projects.sorted {
+            base = store.projects.sorted {
                 let a = store.activityDates[$0.id] ?? .distantPast
                 let b = store.activityDates[$1.id] ?? .distantPast
                 return a > b
             }
         case .alphabetical:
-            return store.projects.sorted {
+            base = store.projects.sorted {
                 $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
             }
         }
+        // Stable partition: starred first, each side preserves the active sort.
+        let starred = base.filter { store.starred[$0.id] == true }
+        let rest = base.filter { store.starred[$0.id] != true }
+        return starred + rest
     }
 
     var body: some View {

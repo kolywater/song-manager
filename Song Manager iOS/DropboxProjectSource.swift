@@ -125,7 +125,7 @@ final class DropboxProjectSource: ProjectSource {
         return latest
     }
 
-    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> URL? {
+    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String)? {
         let bouncesPath = folderPath + "/bounces"
         let entries: [Files.Metadata]
         do {
@@ -144,7 +144,8 @@ final class DropboxProjectSource: ProjectSource {
 
         guard let latest = bounces.first else { return nil }
         let path = latest.pathLower ?? (bouncesPath + "/" + latest.name)
-        return try await getTemporaryLink(path: path)
+        let url = try await getTemporaryLink(path: path)
+        return (url, latest.name)
     }
 
     private func getTemporaryLink(path: String) async throws -> URL {
@@ -167,24 +168,22 @@ final class DropboxProjectSource: ProjectSource {
 
     private static let notesRootPath = "/music/aidenel songs/song notes"
 
-    func loadNotes(for project: ProjectReference) async throws -> [Note] {
+    func loadNotes(for project: ProjectReference) async throws -> NotesDocument {
         let path = Self.notesPath(for: project)
         do {
             let data = try await downloadFile(path: path)
-            let doc = try JSONDecoder().decode(NotesDocument.self, from: data)
-            return doc.notes
+            return try JSONDecoder().decode(NotesDocument.self, from: data)
         } catch {
-            return []
+            return NotesDocument()
         }
     }
 
-    func saveNotes(_ notes: [Note], for project: ProjectReference) async throws {
+    func saveNotes(_ doc: NotesDocument, for project: ProjectReference) async throws {
         let path = Self.notesPath(for: project)
         // App-level write scoping — refuse to write outside song notes/.
         guard path.lowercased().hasPrefix(Self.notesRootPath.lowercased() + "/") else {
             throw DropboxSourceError.api("Refused write outside song notes/: \(path)")
         }
-        let doc = NotesDocument(notes: notes)
         let data = try JSONEncoder().encode(doc)
         try await uploadFile(path: path, data: data)
     }

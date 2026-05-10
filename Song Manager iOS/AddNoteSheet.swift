@@ -93,6 +93,7 @@ struct AddNoteSheet: View {
 
     private func tagChip(_ tag: String) -> some View {
         let isSelected = tags.contains(tag)
+        let color = NoteTags.color(for: tag)
         return Button {
             if isSelected { tags.remove(tag) } else { tags.insert(tag) }
         } label: {
@@ -100,11 +101,11 @@ struct AddNoteSheet: View {
                 .font(.system(size: 14, weight: .semibold))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
-                .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.55))
-                .background(isSelected ? Color.white.opacity(0.16) : Color.clear)
+                .foregroundStyle(isSelected ? Color.white : color.opacity(0.85))
+                .background(isSelected ? color : Color.clear)
                 .overlay(
                     Capsule().stroke(
-                        isSelected ? Color.white.opacity(0.5) : Color.white.opacity(0.18),
+                        isSelected ? color : color.opacity(0.55),
                         lineWidth: 1
                     )
                 )

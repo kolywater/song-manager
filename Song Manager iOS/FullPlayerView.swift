@@ -32,6 +32,7 @@ struct FullPlayerView: View {
                     topBar(project: project)
                     timeline(project: project)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, 12)
                     timeDisplay
                         .padding(.horizontal, 20)
                         .padding(.bottom, 6)
@@ -90,15 +91,36 @@ struct FullPlayerView: View {
     // MARK: - Top bar
 
     private func topBar(project: ProjectReference) -> some View {
-        ZStack {
-            Text(project.displayTitle)
-                .font(.headline.weight(.heavy))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 60)
+        let isStarred = store.starred[project.id] ?? false
+        return ZStack {
+            VStack(spacing: 1) {
+                Text(project.displayTitle)
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let version = currentVersionLabel {
+                    Text(version)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 60)
 
             HStack {
+                Button {
+                    Task { await store.toggleStarred(project) }
+                } label: {
+                    Image(systemName: isStarred ? "star.fill" : "star")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(isStarred ? Color.yellow : .white.opacity(0.85))
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
+                .buttonStyle(.plain)
+
                 Spacer()
+
                 Button {
                     dismiss()
                 } label: {
@@ -115,11 +137,21 @@ struct FullPlayerView: View {
         .padding(.top, 12)
     }
 
+    private var currentVersionLabel: String? {
+        guard let parts = store.audio.currentVersion else { return nil }
+        return "V" + parts.map(String.init).joined(separator: ".")
+    }
+
     // MARK: - Timeline (waveform + pins)
 
     private func timeline(project: ProjectReference) -> some View {
         let bars = waveformBars(for: project)
-        let projectNotes = store.notes[project.id] ?? []
+        let allNotes = store.notes[project.id] ?? []
+        let currentVersion = store.audio.currentVersion
+        // Strict per-version display: only show notes captured against the
+        // currently loaded bounce. Earlier versions stay in the file but
+        // are hidden until a future version selector is added.
+        let projectNotes = allNotes.filter { $0.version == currentVersion }
         let totalH = max(720, CGFloat(bars.count) * barHeight)
 
         return ScrollViewReader { proxy in
@@ -338,12 +370,13 @@ struct FullPlayerView: View {
                 if !note.tags.isEmpty {
                     FlowLayout(spacing: 4) {
                         ForEach(note.tags, id: \.self) { tag in
+                            let color = NoteTags.color(for: tag)
                             Text(tag)
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.45))
+                                .foregroundStyle(color)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 2)
-                                .background(Color.white.opacity(0.07))
+                                .background(color.opacity(0.18))
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                     }
