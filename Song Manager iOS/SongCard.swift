@@ -51,11 +51,7 @@ struct SongCard: View {
         .padding(8)
     }
 
-    /// Black if the artwork is light overall; white otherwise.
-    private var pillForeground: Color {
-        let lum = store.artLuminance[project.id] ?? 0
-        return lum > 0.45 ? .black : .white
-    }
+    private var pillForeground: Color { .white }
 
     @ViewBuilder
     private var artLayer: some View {
