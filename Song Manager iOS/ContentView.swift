@@ -16,6 +16,11 @@ struct ContentView: View {
                     ForEach(store.projects) { project in
                         SongCard(project: project, store: store)
                             .contextMenu {
+                                Button {
+                                    Task { await store.refreshAlbumArt(for: project) }
+                                } label: {
+                                    Label("Refresh artwork", systemImage: "arrow.clockwise")
+                                }
                                 Button(role: .destructive) {
                                     store.removeProject(project)
                                 } label: {

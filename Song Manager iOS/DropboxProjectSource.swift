@@ -63,7 +63,7 @@ final class DropboxProjectSource: ProjectSource {
             let stem = (file.name as NSString).deletingPathExtension.lowercased()
             return stem == officialStem
         }
-        let chosen = official ?? images.sorted { $0.serverModified > $1.serverModified }.first
+        let chosen = official ?? images.sorted { $0.clientModified > $1.clientModified }.first
         guard let chosen else { return nil }
 
         let downloadPath = chosen.pathLower ?? (artFolderPath + "/" + chosen.name)

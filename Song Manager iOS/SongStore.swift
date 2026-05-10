@@ -88,6 +88,12 @@ final class SongStore {
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
     }
 
+    func refreshAlbumArt(for project: ProjectReference) async {
+        albumArt.removeValue(forKey: project.id)
+        try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
+        await loadAlbumArt(for: project)
+    }
+
     func loadAlbumArt(for project: ProjectReference) async {
         if albumArt[project.id] != nil { return }
         if artInFlight.contains(project.id) { return }
