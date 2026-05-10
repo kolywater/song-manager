@@ -70,6 +70,44 @@ final class DropboxProjectSource: ProjectSource {
         return try await downloadFile(path: downloadPath)
     }
 
+    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> URL? {
+        let bouncesPath = folderPath + "/bounces"
+        let entries: [Files.Metadata]
+        do {
+            entries = try await listFolder(path: bouncesPath)
+        } catch {
+            return nil
+        }
+
+        let audioExts: Set<String> = ["wav", "mp3", "aif", "aiff", "flac", "m4a"]
+        let bounces = entries.compactMap { entry -> Files.FileMetadata? in
+            guard let file = entry as? Files.FileMetadata else { return nil }
+            let ext = (file.name as NSString).pathExtension.lowercased()
+            return audioExts.contains(ext) ? file : nil
+        }
+        .sorted { $0.clientModified > $1.clientModified }
+
+        guard let latest = bounces.first else { return nil }
+        let path = latest.pathLower ?? (bouncesPath + "/" + latest.name)
+        return try await getTemporaryLink(path: path)
+    }
+
+    private func getTemporaryLink(path: String) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            client.files.getTemporaryLink(path: path).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: DropboxSourceError.api(String(describing: error)))
+                    return
+                }
+                guard let response, let url = URL(string: response.link) else {
+                    continuation.resume(throwing: DropboxSourceError.api("No temporary link"))
+                    return
+                }
+                continuation.resume(returning: url)
+            }
+        }
+    }
+
     private func listFolder(path: String) async throws -> [Files.Metadata] {
         try await withCheckedThrowingContinuation { continuation in
             client.files.listFolder(path: path).response { response, error in

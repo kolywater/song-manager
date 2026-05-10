@@ -10,6 +10,8 @@ final class SongStore {
     var albumArt: [UUID: UIImage] = [:]
     var errorMessage: String?
     var isLoadingPicker = false
+    var loadingPlaybackForProjectID: UUID?
+    let audio = AudioService()
 
     private let source: DropboxProjectSource?
     private var artInFlight: Set<UUID> = []
@@ -92,6 +94,30 @@ final class SongStore {
         albumArt.removeValue(forKey: project.id)
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         await loadAlbumArt(for: project)
+    }
+
+    func play(_ project: ProjectReference) async {
+        // If this is the same song already playing, just toggle.
+        if audio.nowPlaying?.id == project.id {
+            audio.togglePlay()
+            return
+        }
+        guard let source else {
+            errorMessage = "Dropbox not configured"
+            return
+        }
+        guard case .dropboxPath(let folderPath) = project.location else { return }
+        loadingPlaybackForProjectID = project.id
+        defer { loadingPlaybackForProjectID = nil }
+        do {
+            guard let url = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
+                errorMessage = "No bounces found in \(project.displayName)"
+                return
+            }
+            audio.play(url: url, project: project, artwork: albumArt[project.id])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func loadAlbumArt(for project: ProjectReference) async {
