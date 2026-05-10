@@ -39,6 +39,7 @@ final class SongStore {
             self.errorMessage = error.localizedDescription
         }
         loadFromDisk(at: url)
+        activityDates = Self.loadActivityDatesFromDisk()
         Task { [weak self] in
             await self?.refreshActivityDates()
         }
@@ -153,6 +154,7 @@ final class SongStore {
                 if let date { activityDates[id] = date }
             }
         }
+        saveActivityDates()
     }
 
     private func refreshActivityDate(for project: ProjectReference) async {
@@ -160,7 +162,33 @@ final class SongStore {
               case .dropboxPath(let path) = project.location else { return }
         if let date = try? await source.fetchLatestActivityDate(forFolderPath: path) {
             activityDates[project.id] = date
+            saveActivityDates()
         }
+    }
+
+    private static func activityDatesURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appending(path: "activityDates.json")
+    }
+
+    private static func loadActivityDatesFromDisk() -> [UUID: Date] {
+        guard let data = try? Data(contentsOf: activityDatesURL()),
+              let raw = try? JSONDecoder().decode([String: Date].self, from: data) else {
+            return [:]
+        }
+        var result: [UUID: Date] = [:]
+        for (key, date) in raw {
+            if let id = UUID(uuidString: key) { result[id] = date }
+        }
+        return result
+    }
+
+    private func saveActivityDates() {
+        let raw = Dictionary(
+            uniqueKeysWithValues: activityDates.map { ($0.key.uuidString, $0.value) }
+        )
+        guard let data = try? JSONEncoder().encode(raw) else { return }
+        try? data.write(to: Self.activityDatesURL(), options: .atomic)
     }
 
     func removeProject(_ project: ProjectReference) {
@@ -170,6 +198,7 @@ final class SongStore {
         // artLuminance.removeValue(forKey: project.id)
         artTintColor.removeValue(forKey: project.id)
         activityDates.removeValue(forKey: project.id)
+        saveActivityDates()
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)
     }
