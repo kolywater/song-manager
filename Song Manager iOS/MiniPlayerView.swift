@@ -11,15 +11,15 @@ struct MiniPlayerView: View {
                         .frame(width: 38, height: 38)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(project.displayTitle)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
                             .lineLimit(1)
                         if store.audio.duration > 0 {
                             Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.7))
                                 .monospacedDigit()
                                 .lineLimit(1)
                         }
