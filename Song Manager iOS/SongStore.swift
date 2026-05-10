@@ -141,11 +141,12 @@ final class SongStore {
         await loadAlbumArt(for: project)
     }
 
-    func play(_ project: ProjectReference, autoStart: Bool = false) async {
-        // If this is the same song already loaded, just open the full player.
+    func play(_ project: ProjectReference, autoStart: Bool = false, showPlayer: Bool = true) async {
+        // If this is the same song already loaded, just resume / open as
+        // requested.
         if audio.nowPlaying?.id == project.id {
             if autoStart && !audio.isPlaying { audio.resume() }
-            presentingFullPlayer = true
+            if showPlayer { presentingFullPlayer = true }
             return
         }
         guard let source else {
@@ -157,7 +158,7 @@ final class SongStore {
         // Present the player immediately with project info; audio prepares
         // in the background.
         audio.preparePlayback(for: project)
-        presentingFullPlayer = true
+        if showPlayer { presentingFullPlayer = true }
 
         do {
             guard let url = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {

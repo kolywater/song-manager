@@ -34,7 +34,7 @@ struct SongCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
-                Task { await store.play(project, autoStart: true) }
+                Task { await store.play(project, autoStart: true, showPlayer: false) }
             } label: {
                 Image(systemName: "play.fill")
                     .font(.system(size: 11))
