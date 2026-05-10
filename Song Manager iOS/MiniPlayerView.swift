@@ -7,23 +7,28 @@ struct MiniPlayerView: View {
         if let project = store.audio.nowPlaying {
             VStack(spacing: 8) {
                 HStack(spacing: 12) {
-                    artwork(for: project)
-                        .frame(width: 42, height: 42)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    HStack(spacing: 12) {
+                        artwork(for: project)
+                            .frame(width: 42, height: 42)
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(project.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        if store.audio.duration > 0 {
-                            Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(project.displayName)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            if store.audio.duration > 0 {
+                                Text(timecode(store.audio.currentTime) + " / " + timecode(store.audio.duration))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
                         }
+                        Spacer(minLength: 0)
                     }
-
-                    Spacer(minLength: 8)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        store.presentingFullPlayer = true
+                    }
 
                     Button {
                         store.audio.togglePlay()

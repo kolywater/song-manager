@@ -11,6 +11,7 @@ final class SongStore {
     var errorMessage: String?
     var isLoadingPicker = false
     var loadingPlaybackForProjectID: UUID?
+    var presentingFullPlayer: Bool = false
     let audio = AudioService()
 
     private let source: DropboxProjectSource?
@@ -97,9 +98,9 @@ final class SongStore {
     }
 
     func play(_ project: ProjectReference) async {
-        // If this is the same song already playing, just toggle.
+        // If this is the same song already playing, just open the full player.
         if audio.nowPlaying?.id == project.id {
-            audio.togglePlay()
+            presentingFullPlayer = true
             return
         }
         guard let source else {
@@ -115,6 +116,7 @@ final class SongStore {
                 return
             }
             audio.play(url: url, project: project, artwork: albumArt[project.id])
+            presentingFullPlayer = true
         } catch {
             errorMessage = error.localizedDescription
         }

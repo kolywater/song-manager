@@ -94,6 +94,11 @@ final class AudioService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
+    func skip(by delta: Double) {
+        let target = max(0, min(duration > 0 ? duration : currentTime + delta, currentTime + delta))
+        seek(to: target)
+    }
+
     func seek(to seconds: Double) {
         guard let player else { return }
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
