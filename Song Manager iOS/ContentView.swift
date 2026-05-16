@@ -1,47 +1,20 @@
 import SwiftUI
 
-enum LibrarySortMode: String, CaseIterable, Identifiable {
-    case recent = "Recent"
-    case alphabetical = "A–Z"
-    var id: Self { self }
-}
-
 struct ContentView: View {
     @State private var store = SongStore()
     @State private var showAddSheet = false
-    @State private var sortMode: LibrarySortMode = .recent
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
 
-    private var sortedProjects: [ProjectReference] {
-        let base: [ProjectReference]
-        switch sortMode {
-        case .recent:
-            base = store.projects.sorted {
-                let a = store.activityDates[$0.id] ?? .distantPast
-                let b = store.activityDates[$1.id] ?? .distantPast
-                return a > b
-            }
-        case .alphabetical:
-            base = store.projects.sorted {
-                $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
-            }
-        }
-        // Stable partition: starred first, each side preserves the active sort.
-        let starred = base.filter { store.starred[$0.id] == true }
-        let rest = base.filter { store.starred[$0.id] != true }
-        return starred + rest
-    }
-
     var body: some View {
         @Bindable var store = store
         NavigationStack {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(sortedProjects) { project in
+                    ForEach(store.sortedProjects) { project in
                         SongCard(project: project, store: store)
                             .contextMenu {
                                 Button {
@@ -75,7 +48,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
-                        Picker("Sort", selection: $sortMode) {
+                        Picker("Sort", selection: $store.sortMode) {
                             ForEach(LibrarySortMode.allCases) { mode in
                                 Text(mode.rawValue).tag(mode)
                             }

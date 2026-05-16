@@ -24,11 +24,16 @@ struct NotesDocument: Codable {
     var version: Int
     var notes: [Note]
     var starred: Bool
+    /// Path of the user's chosen audio file relative to the song folder
+    /// (e.g. "bounces/MySong 1.3.wav" or "_MASTERS/master.wav"). nil =
+    /// fall back to the latest bounce.
+    var selectedAudioPath: String?
 
-    init(notes: [Note] = [], starred: Bool = false) {
+    init(notes: [Note] = [], starred: Bool = false, selectedAudioPath: String? = nil) {
         self.version = 2
         self.notes = notes
         self.starred = starred
+        self.selectedAudioPath = selectedAudioPath
     }
 
     init(from decoder: Decoder) throws {
@@ -36,9 +41,10 @@ struct NotesDocument: Codable {
         self.version = try c.decode(Int.self, forKey: .version)
         self.notes = try c.decodeIfPresent([Note].self, forKey: .notes) ?? []
         self.starred = try c.decodeIfPresent(Bool.self, forKey: .starred) ?? false
+        self.selectedAudioPath = try c.decodeIfPresent(String.self, forKey: .selectedAudioPath)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, notes, starred
+        case version, notes, starred, selectedAudioPath
     }
 }

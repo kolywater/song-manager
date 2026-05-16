@@ -5,10 +5,17 @@ import SwiftUI
 import SwiftyDropbox
 import UIKit
 
+enum LibrarySortMode: String, CaseIterable, Identifiable {
+    case recent = "Recent"
+    case alphabetical = "A–Z"
+    var id: Self { self }
+}
+
 @MainActor
 @Observable
 final class SongStore {
     var projects: [ProjectReference] = []
+    var sortMode: LibrarySortMode = .recent
     var availableFolders: [FolderRef] = []
     var albumArt: [UUID: UIImage] = [:]
     // Luminance is computed alongside the tint color in summarize() but
@@ -25,6 +32,8 @@ final class SongStore {
     var presentingFullPlayer: Bool = false
     var notes: [UUID: [Note]] = [:]
     var starred: [UUID: Bool] = [:]
+    var selectedAudioPath: [UUID: String] = [:]
+    var audioFiles: [UUID: [AudioFileMeta]] = [:]
     let audio = AudioService()
     let waveform = WaveformService()
 
@@ -58,9 +67,29 @@ final class SongStore {
         loadFromDisk(at: url)
         activityDates = Self.loadActivityDatesFromDisk()
         starred = Self.loadStarredFromDisk()
+        selectedAudioPath = Self.loadSelectedAudioFromDisk()
         if source != nil {
             Task { [weak self] in
                 await self?.refreshActivityDates()
+            }
+            Task { [weak self] in
+                await self?.prefetchProjectStates()
+            }
+        }
+    }
+
+    /// One-shot fan-out fetch of every project's NotesDocument. Hydrates
+    /// `starred` and `selectedAudioPath` from Dropbox so a fresh device
+    /// (or freshly-wiped app) sees its cross-device state without having
+    /// to open each player. Local mirrors persist; subsequent launches
+    /// read those instantly and this just reconciles.
+    func prefetchProjectStates() async {
+        await withTaskGroup(of: Void.self) { group in
+            for project in projects {
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    await self.loadNotes(for: project)
+                }
             }
         }
     }
@@ -78,6 +107,7 @@ final class SongStore {
             return false
         }
         Task { [weak self] in await self?.refreshActivityDates() }
+        Task { [weak self] in await self?.prefetchProjectStates() }
         return true
     }
 
@@ -89,6 +119,31 @@ final class SongStore {
     private static func starredCacheURL() -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docs.appending(path: "iosStarred.json")
+    }
+
+    private static func selectedAudioCacheURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appending(path: "iosSelectedAudio.json")
+    }
+
+    /// Local mirror of NotesDocument.selectedAudioPath, keyed by project
+    /// UUID. Lets play() resolve the chosen file synchronously without
+    /// waiting on Dropbox.
+    private static func loadSelectedAudioFromDisk() -> [UUID: String] {
+        guard let data = try? Data(contentsOf: selectedAudioCacheURL()),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        var out: [UUID: String] = [:]
+        for (key, value) in dict {
+            if let id = UUID(uuidString: key) { out[id] = value }
+        }
+        return out
+    }
+
+    private func saveSelectedAudioToDisk() {
+        let dict = Dictionary(uniqueKeysWithValues: selectedAudioPath.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(dict) else { return }
+        try? data.write(to: Self.selectedAudioCacheURL(), options: .atomic)
     }
 
     /// Local-only cache of starred state, keyed by project UUID. The
@@ -279,10 +334,6 @@ final class SongStore {
             if showPlayer { presentingFullPlayer = true }
             return
         }
-        guard let source else {
-            errorMessage = "Dropbox not configured"
-            return
-        }
         guard case .dropboxPath(let folderPath) = project.location else { return }
 
         // Present the player immediately with project info; audio prepares
@@ -290,29 +341,94 @@ final class SongStore {
         audio.preparePlayback(for: project)
         if showPlayer { presentingFullPlayer = true }
 
-        do {
-            guard let bounce = try await source.fetchLatestBounceURL(forFolderPath: folderPath) else {
-                errorMessage = "No bounces found in \(project.displayName)"
-                audio.stop()
-                presentingFullPlayer = false
-                return
+        // Online path: resolve via Dropbox, then play (cache-first via
+        // cachedOrStream). On failure (offline / auth gone) we fall
+        // through to the local-cache fallback below.
+        if let source {
+            do {
+                if let bounce = try await resolveAudio(source: source, project: project, folderPath: folderPath) {
+                    guard audio.nowPlaying?.id == project.id else { return }
+                    let playbackURL = cachedOrStream(bounce: bounce, project: project)
+                    audio.load(url: playbackURL, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL)
+                    }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await self.loadNotes(for: project)
+                    }
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await self.loadAudioFiles(for: project)
+                    }
+                    return
+                }
+            } catch {
+                // Swallow; try the offline cache fallback before surfacing.
             }
-            // Bail if the user already moved on to a different project.
-            guard audio.nowPlaying?.id == project.id else { return }
-            audio.load(url: bounce.url, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
-            Task { [weak self] in
-                guard let self else { return }
-                await self.waveform.loadWaveform(for: project, audioURL: bounce.url)
-            }
-            Task { [weak self] in
-                guard let self else { return }
-                await self.loadNotes(for: project)
-            }
-        } catch {
-            handleDropboxError(error)
-            audio.stop()
-            presentingFullPlayer = false
         }
+
+        // Offline fallback: play whatever we have cached for this song.
+        if let cached = cachedLocalAudio(for: project) {
+            guard audio.nowPlaying?.id == project.id else { return }
+            audio.load(url: cached.url, project: project, filename: cached.filename, artwork: albumArt[project.id], autoStart: autoStart)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.waveform.loadWaveform(for: project, audioURL: cached.url)
+            }
+            return
+        }
+
+        errorMessage = source == nil
+            ? "Dropbox not connected and no offline copy of \(project.displayName)"
+            : "Can't reach Dropbox and no offline copy of \(project.displayName)"
+        audio.stop()
+        presentingFullPlayer = false
+    }
+
+    // MARK: - Sort + navigation
+
+    /// The home grid's display order, also used by player prev/next.
+    /// Starred items partition to the top under either sort mode.
+    var sortedProjects: [ProjectReference] {
+        let base: [ProjectReference]
+        switch sortMode {
+        case .recent:
+            base = projects.sorted {
+                let a = activityDates[$0.id] ?? .distantPast
+                let b = activityDates[$1.id] ?? .distantPast
+                return a > b
+            }
+        case .alphabetical:
+            base = projects.sorted {
+                $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending
+            }
+        }
+        let starredFirst = base.filter { starred[$0.id] == true }
+        let rest = base.filter { starred[$0.id] != true }
+        return starredFirst + rest
+    }
+
+    func playNext() async {
+        await playRelative(by: 1)
+    }
+
+    func playPrevious() async {
+        await playRelative(by: -1)
+    }
+
+    private func playRelative(by offset: Int) async {
+        let list = sortedProjects
+        guard !list.isEmpty,
+              let currentID = audio.nowPlaying?.id,
+              let idx = list.firstIndex(where: { $0.id == currentID })
+        else { return }
+        let n = list.count
+        let nextIdx = ((idx + offset) % n + n) % n
+        let target = list[nextIdx]
+        if target.id == currentID { return }
+        await play(target, autoStart: audio.isPlaying, showPlayer: false)
     }
 
     // MARK: - Notes
@@ -329,6 +445,10 @@ final class SongStore {
             if starred[project.id] != doc.starred {
                 starred[project.id] = doc.starred
                 saveStarredToDisk()
+            }
+            if selectedAudioPath[project.id] != doc.selectedAudioPath {
+                selectedAudioPath[project.id] = doc.selectedAudioPath
+                saveSelectedAudioToDisk()
             }
         } catch {
             notes[project.id] = []
@@ -366,13 +486,125 @@ final class SongStore {
     private func persistDoc(for project: ProjectReference, source: DropboxProjectSource) async {
         let doc = NotesDocument(
             notes: notes[project.id] ?? [],
-            starred: starred[project.id] ?? false
+            starred: starred[project.id] ?? false,
+            selectedAudioPath: selectedAudioPath[project.id]
         )
         do {
             try await source.saveNotes(doc, for: project)
         } catch {
             handleDropboxError(error)
         }
+    }
+
+    // MARK: - Audio file selection
+
+    /// List all bounces + masters for a project. Cached after the first
+    /// fetch; call again to refresh.
+    func loadAudioFiles(for project: ProjectReference) async {
+        guard let source else { return }
+        guard case .dropboxPath(let folderPath) = project.location else { return }
+        do {
+            let files = try await source.listAudioFiles(forFolderPath: folderPath)
+            audioFiles[project.id] = files
+        } catch {
+            handleDropboxError(error)
+        }
+    }
+
+    /// Persist the user's audio choice for a project and reload playback
+    /// from the new file.
+    func selectAudioFile(_ file: AudioFileMeta, for project: ProjectReference) async {
+        guard let source else { return }
+        selectedAudioPath[project.id] = file.relativePath
+        saveSelectedAudioToDisk()
+        await persistDoc(for: project, source: source)
+        await loadAndPlay(project: project, autoStart: audio.isPlaying)
+    }
+
+    /// Reloads audio for an already-presented player, honoring the
+    /// current `selectedAudioPath`.
+    private func loadAndPlay(project: ProjectReference, autoStart: Bool) async {
+        guard case .dropboxPath(let folderPath) = project.location else { return }
+
+        if let source {
+            do {
+                if let bounce = try await resolveAudio(source: source, project: project, folderPath: folderPath) {
+                    guard audio.nowPlaying?.id == project.id else { return }
+                    let playbackURL = cachedOrStream(bounce: bounce, project: project)
+                    audio.load(url: playbackURL, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
+                    Task { [weak self] in
+                        guard let self else { return }
+                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL)
+                    }
+                    return
+                }
+            } catch {
+                // Fall through to offline cache fallback.
+            }
+        }
+
+        if let cached = cachedLocalAudio(for: project) {
+            guard audio.nowPlaying?.id == project.id else { return }
+            audio.load(url: cached.url, project: project, filename: cached.filename, artwork: albumArt[project.id], autoStart: autoStart)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.waveform.loadWaveform(for: project, audioURL: cached.url)
+            }
+            return
+        }
+
+        errorMessage = "No offline copy of \(project.displayName)"
+    }
+
+    /// Resolve which audio to play for a given project. If the user has
+    /// picked a file (and it still exists), use that; otherwise fall back
+    /// to the latest bounce — same default the Mac uses when no master is
+    /// selected.
+    private func resolveAudio(
+        source: DropboxProjectSource,
+        project: ProjectReference,
+        folderPath: String
+    ) async throws -> (url: URL, filename: String, relativePath: String)? {
+        if let selected = selectedAudioPath[project.id] {
+            if let result = try await source.fetchAudioURL(forFolderPath: folderPath, relativePath: selected) {
+                return (result.url, result.filename, selected)
+            }
+            // fetchAudioURL swallows errors and returns nil for both "file
+            // is gone" and "network is down". Don't clobber the selection
+            // on transient failures — the user can clear it manually via
+            // the file picker if it's truly missing.
+        }
+        return try await source.fetchLatestBounceURL(forFolderPath: folderPath)
+    }
+
+    /// Offline-only lookup: prefers the explicit selection if cached,
+    /// else falls back to whatever's most recently cached for this song.
+    private func cachedLocalAudio(for project: ProjectReference) -> (url: URL, filename: String)? {
+        if let relativePath = selectedAudioPath[project.id] {
+            let filename = (relativePath as NSString).lastPathComponent
+            if let url = AudioCache.shared.localURL(projectID: project.id, filename: filename) {
+                return (url, filename)
+            }
+        }
+        if let url = AudioCache.shared.latestCachedURL(projectID: project.id) {
+            return (url, url.lastPathComponent)
+        }
+        return nil
+    }
+
+    /// Cache hit returns the local URL; cache miss kicks off a background
+    /// download and returns the streaming URL.
+    private func cachedOrStream(
+        bounce: (url: URL, filename: String, relativePath: String),
+        project: ProjectReference
+    ) -> URL {
+        if let local = AudioCache.shared.localURL(projectID: project.id, filename: bounce.filename) {
+            return local
+        }
+        Task.detached { [filename = bounce.filename, remote = bounce.url, id = project.id] in
+            _ = try? await AudioCache.shared.download(from: remote, projectID: id, filename: filename)
+        }
+        return bounce.url
     }
 
     // MARK: - Album art

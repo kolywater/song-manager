@@ -125,27 +125,67 @@ final class DropboxProjectSource: ProjectSource {
         return latest
     }
 
-    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String)? {
-        let bouncesPath = folderPath + "/bounces"
+    private static let audioExts: Set<String> = ["wav", "mp3", "aif", "aiff", "flac", "m4a"]
+
+    /// All playable audio files under the song folder, grouped by
+    /// `bounces/` (flat) and `_MASTERS/` (recursive — masters folders
+    /// often contain per-mix subfolders). Each entry's `relativePath` is
+    /// the canonical key used by the picker, NotesDocument, and
+    /// `fetchAudioURL(...)`.
+    func listAudioFiles(forFolderPath folderPath: String) async throws -> [AudioFileMeta] {
+        async let bounces = listAudioFiles(at: folderPath + "/bounces", folderPath: folderPath, isMaster: false, recursive: false)
+        async let masters = listAudioFiles(at: folderPath + "/_MASTERS", folderPath: folderPath, isMaster: true, recursive: true)
+        let (b, m) = try await (bounces, masters)
+        return b + m
+    }
+
+    private func listAudioFiles(at path: String, folderPath: String, isMaster: Bool, recursive: Bool) async -> [AudioFileMeta] {
         let entries: [Files.Metadata]
         do {
-            entries = try await listFolder(path: bouncesPath)
+            entries = try await listFolder(path: path, recursive: recursive)
+        } catch {
+            return []
+        }
+        let fileEntries = entries.compactMap { $0 as? Files.FileMetadata }
+        let prefix = folderPath + "/"
+        return fileEntries.compactMap { file -> AudioFileMeta? in
+            let ext = (file.name as NSString).pathExtension.lowercased()
+            guard Self.audioExts.contains(ext) else { return nil }
+            let fullPath = file.pathDisplay ?? file.pathLower ?? (path + "/" + file.name)
+            let relative = fullPath.hasPrefix(prefix)
+                ? String(fullPath.dropFirst(prefix.count))
+                : file.name
+            return AudioFileMeta(
+                filename: file.name,
+                relativePath: relative,
+                modDate: file.clientModified,
+                isMaster: isMaster
+            )
+        }
+        .sorted { $0.modDate > $1.modDate }
+    }
+
+    /// Resolve a specific relative path (`bounces/...` or `_MASTERS/...`)
+    /// to a Dropbox temporary URL. Returns nil if the file no longer
+    /// exists.
+    func fetchAudioURL(forFolderPath folderPath: String, relativePath: String) async throws -> (url: URL, filename: String)? {
+        let path = folderPath + "/" + relativePath
+        do {
+            let url = try await getTemporaryLink(path: path)
+            let filename = (relativePath as NSString).lastPathComponent
+            return (url, filename)
         } catch {
             return nil
         }
+    }
 
-        let audioExts: Set<String> = ["wav", "mp3", "aif", "aiff", "flac", "m4a"]
-        let bounces = entries.compactMap { entry -> Files.FileMetadata? in
-            guard let file = entry as? Files.FileMetadata else { return nil }
-            let ext = (file.name as NSString).pathExtension.lowercased()
-            return audioExts.contains(ext) ? file : nil
-        }
-        .sorted { $0.clientModified > $1.clientModified }
-
-        guard let latest = bounces.first else { return nil }
-        let path = latest.pathLower ?? (bouncesPath + "/" + latest.name)
-        let url = try await getTemporaryLink(path: path)
-        return (url, latest.name)
+    /// Convenience: pick the latest bounce when no explicit selection
+    /// has been made. Mirrors the Mac default.
+    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String, relativePath: String)? {
+        let files = await listAudioFiles(at: folderPath + "/bounces", folderPath: folderPath, isMaster: false, recursive: false)
+        guard let latest = files.first else { return nil }
+        let url = try await getTemporaryLink(path: folderPath + "/" + latest.relativePath)
+        return (url, latest.filename, latest.relativePath)
     }
 
     private func getTemporaryLink(path: String) async throws -> URL {
@@ -205,14 +245,53 @@ final class DropboxProjectSource: ProjectSource {
         }
     }
 
-    private func listFolder(path: String) async throws -> [Files.Metadata] {
+    private func listFolder(path: String, recursive: Bool = false) async throws -> [Files.Metadata] {
+        var entries: [Files.Metadata] = []
+        var page = try await listFolderPage(path: path, recursive: recursive)
+        entries.append(contentsOf: page.entries)
+        while page.hasMore, let cursor = page.cursor {
+            page = try await listFolderContinue(cursor: cursor)
+            entries.append(contentsOf: page.entries)
+        }
+        return entries
+    }
+
+    private struct ListFolderPage {
+        let entries: [Files.Metadata]
+        let hasMore: Bool
+        let cursor: String?
+    }
+
+    private func listFolderPage(path: String, recursive: Bool) async throws -> ListFolderPage {
         try await withCheckedThrowingContinuation { continuation in
-            client.files.listFolder(path: path).response { response, error in
+            client.files.listFolder(path: path, recursive: recursive).response { response, error in
                 if let error = error {
                     continuation.resume(throwing: Self.mapError(error))
                     return
                 }
-                continuation.resume(returning: response?.entries ?? [])
+                let result = ListFolderPage(
+                    entries: response?.entries ?? [],
+                    hasMore: response?.hasMore ?? false,
+                    cursor: response?.cursor
+                )
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private func listFolderContinue(cursor: String) async throws -> ListFolderPage {
+        try await withCheckedThrowingContinuation { continuation in
+            client.files.listFolderContinue(cursor: cursor).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: Self.mapError(error))
+                    return
+                }
+                let result = ListFolderPage(
+                    entries: response?.entries ?? [],
+                    hasMore: response?.hasMore ?? false,
+                    cursor: response?.cursor
+                )
+                continuation.resume(returning: result)
             }
         }
     }

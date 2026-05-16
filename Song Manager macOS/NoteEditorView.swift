@@ -7,8 +7,15 @@ struct NoteEditorView: View {
     @Binding var text: String
     var onSave: () -> Void
     var onDismiss: () -> Void
+    var baseText: String = ""
+    var rootURL: URL?
+    var notesURL: URL?
+    var reloadNotes: (() -> String)?
 
     private let autoSaveInterval: TimeInterval = 3
+
+    @State private var baseSnapshot = ""
+    @State private var watcher = FileWatcher()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,10 +37,33 @@ struct NoteEditorView: View {
                 .padding(8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            baseSnapshot = baseText
+            if let rootURL, let notesURL {
+                watcher.start(rootURL: rootURL, notesPath: notesURL.path(percentEncoded: false)) {
+                    handleExternalChange()
+                }
+            }
+        }
+        .onDisappear {
+            watcher.stop()
+            onSave()
+        }
         .onReceive(Timer.publish(every: autoSaveInterval, on: .main, in: .common).autoconnect()) { _ in
             onSave()
         }
-        .onDisappear { onSave() }
+    }
+
+    private func handleExternalChange() {
+        guard let reloadNotes else { return }
+        let fresh = reloadNotes()
+        guard fresh != text else { return }
+        if text == baseSnapshot {
+            text = fresh
+        } else {
+            text = TextMerge.merge(base: baseSnapshot, local: text, remote: fresh)
+        }
+        baseSnapshot = fresh
     }
 
     private func insertDate() {
@@ -42,6 +72,39 @@ struct NoteEditorView: View {
         let snippet = "\(formatter.string(from: Date()))\n——————————————————\n"
         text.insert(contentsOf: snippet, at: text.startIndex)
     }
+}
+
+final class FileWatcher {
+    private var source: (any DispatchSourceFileSystemObject)?
+
+    func start(rootURL: URL, notesPath: String, onChange: @escaping () -> Void) {
+        stop()
+        guard rootURL.startAccessingSecurityScopedResource() else { return }
+        let fd = open(notesPath, O_EVTONLY)
+        guard fd >= 0 else {
+            rootURL.stopAccessingSecurityScopedResource()
+            return
+        }
+        let src = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+        src.setEventHandler { onChange() }
+        src.setCancelHandler {
+            close(fd)
+            rootURL.stopAccessingSecurityScopedResource()
+        }
+        src.resume()
+        source = src
+    }
+
+    func stop() {
+        source?.cancel()
+        source = nil
+    }
+
+    deinit { stop() }
 }
 
 struct CheckboxTextEditor: NSViewRepresentable {

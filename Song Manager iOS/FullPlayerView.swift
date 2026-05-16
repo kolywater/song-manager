@@ -7,6 +7,7 @@ struct FullPlayerView: View {
     @State private var showAddNote: Bool = false
     @State private var speech = SpeechRecognitionService()
     @State private var voiceNoteStartTime: Double = 0
+    @State private var showAudioPicker: Bool = false
     /// Suppresses auto-scroll while the user is interacting with the
     /// scroll view (and for a grace period after they let go), so manual
     /// scrolling isn't fought by the playback follow-along.
@@ -122,6 +123,17 @@ struct FullPlayerView: View {
                 Spacer()
 
                 Button {
+                    showAudioPicker = true
+                } label: {
+                    Image(systemName: "tray.full")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .glassEffect(.regular.interactive(), in: Circle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
@@ -135,6 +147,11 @@ struct FullPlayerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+        .sheet(isPresented: $showAudioPicker) {
+            AudioFilePickerSheet(project: project, store: store)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var currentVersionLabel: String? {
@@ -463,7 +480,7 @@ struct FullPlayerView: View {
         ZStack {
             playPauseButton
             HStack {
-                loopButton
+                loopAndTrackCombo
                 if showSkipButtons {
                     skipButton(seconds: -10, systemImage: "gobackward.10")
                 }
@@ -484,6 +501,56 @@ struct FullPlayerView: View {
             recordingMicButton(project: project)
             Spacer()
         }
+    }
+
+    /// Previous/next merged into a single glass capsule, mirroring the
+    /// mic+plus combo on the right. Loop control was removed for now —
+    /// `AudioService.isLooping` defaults to true. Reintroduce by adding a
+    /// loop segment back at the head of this HStack and the divider after.
+    private var loopAndTrackCombo: some View {
+        HStack(spacing: 0) {
+            // Button {
+            //     store.audio.toggleLoop()
+            // } label: {
+            //     Image(systemName: "repeat")
+            //         .font(.title2)
+            //         .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.85))
+            //         .frame(width: 52, height: 52)
+            //         .contentShape(Rectangle())
+            // }
+            // .buttonStyle(.plain)
+            //
+            // Rectangle()
+            //     .fill(Color.white.opacity(0.15))
+            //     .frame(width: 0.5, height: 28)
+
+            Button {
+                Task { await store.playPrevious() }
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 52, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: 0.5, height: 28)
+
+            Button {
+                Task { await store.playNext() }
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 52, height: 52)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .glassEffect(.regular.interactive(), in: Capsule())
     }
 
     private var loopButton: some View {

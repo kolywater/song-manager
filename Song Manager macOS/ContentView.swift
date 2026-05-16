@@ -10,6 +10,9 @@ struct ContentView: View {
     @State private var draggingProject: ProjectReference?
     @State private var showingNotes = false
     @State private var notesText = ""
+    @State private var notesBaseText = ""
+    @State private var notesRootURL: URL?
+    @State private var notesFileURL: URL?
     @State private var projectForNotes: ProjectReference?
 
     private let columns = [
@@ -48,6 +51,10 @@ struct ContentView: View {
                         onNotes: {
                             projectForNotes = project
                             notesText = store.loadNotes(for: project)
+                            notesBaseText = notesText
+                            let info = store.notesFileInfo(for: project)
+                            notesRootURL = info?.rootURL
+                            notesFileURL = info?.notesURL
                             showingNotes = true
                         },
                         onShowInFinder: { store.showInFinder(for: project) },
@@ -169,7 +176,11 @@ struct ContentView: View {
                     onDismiss: {
                         store.saveNotes(for: project, text: notesText)
                         showingNotes = false
-                    }
+                    },
+                    baseText: notesBaseText,
+                    rootURL: notesRootURL,
+                    notesURL: notesFileURL,
+                    reloadNotes: { store.loadNotes(for: project) }
                 )
                 .background(Color(.windowBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -10,7 +10,7 @@ final class AudioService {
     var nowPlaying: ProjectReference?
     var currentTrackFilename: String?
     var isPlaying: Bool = false
-    var isLooping: Bool = false
+    var isLooping: Bool = true
     var currentTime: Double = 0
     var duration: Double = 0
 
