@@ -17,6 +17,11 @@ struct Song_Manager_iOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task {
+                    // Warm up the speech model in the background so the
+                    // first mic press doesn't sit on the model load.
+                    FluidAudioASRService.shared.prepare()
+                }
                 .onOpenURL { url in
                     DropboxClientsManager.handleRedirectURL(url, includeBackgroundClient: false) { result in
                         if case .success = result {

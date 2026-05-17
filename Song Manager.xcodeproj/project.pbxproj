@@ -10,6 +10,7 @@
 		DFA878652F3BB13E00C2B393 /* appIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = DFA878642F3BB13E00C2B393 /* appIcon.icon */; };
 		DFAB003000000000000000A1 /* SwiftyDropbox in Frameworks */ = {isa = PBXBuildFile; productRef = DFAB002000000000000000A1 /* SwiftyDropbox */; };
 		DFAB004000000000000000A1 /* appIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = DFA878642F3BB13E00C2B393 /* appIcon.icon */; };
+		DFAB005200000000000000A1 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = DFAB005100000000000000A1 /* FluidAudio */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DFAB003000000000000000A1 /* SwiftyDropbox in Frameworks */,
+				DFAB005200000000000000A1 /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -97,6 +99,7 @@
 			name = "Song Manager iOS";
 			packageProductDependencies = (
 				DFAB002000000000000000A1 /* SwiftyDropbox */,
+				DFAB005100000000000000A1 /* FluidAudio */,
 			);
 			productName = "Song Manager iOS";
 			productReference = DF0E85382FB019BC00F73DEC /* Song Manager iOS.app */;
@@ -154,6 +157,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				DFAB001000000000000000A1 /* XCRemoteSwiftPackageReference "SwiftyDropbox" */,
+				DFAB005000000000000000A1 /* XCRemoteSwiftPackageReference "FluidAudio" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DF4530322F397EA900DEF077 /* Products */;
@@ -214,7 +218,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-iOS.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -244,7 +248,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Info-iOS.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -495,6 +499,14 @@
 				minimumVersion = 10.0.0;
 			};
 		};
+		DFAB005000000000000000A1 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.14.6;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -502,6 +514,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DFAB001000000000000000A1 /* XCRemoteSwiftPackageReference "SwiftyDropbox" */;
 			productName = SwiftyDropbox;
+		};
+		DFAB005100000000000000A1 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DFAB005000000000000000A1 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

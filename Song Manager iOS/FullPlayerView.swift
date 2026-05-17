@@ -6,7 +6,7 @@ struct FullPlayerView: View {
     @State private var scrubProgress: Double? = nil
     @State private var showAddNote: Bool = false
     @State private var editingNote: Note?
-    @State private var speech = SpeechRecognitionService()
+    private let speech = FluidAudioASRService.shared
     @State private var voiceNoteStartTime: Double = 0
     @State private var showAudioPicker: Bool = false
     /// Suppresses auto-scroll while the user is interacting with the
@@ -27,14 +27,16 @@ struct FullPlayerView: View {
     private let autoScrollResumeDelay: Duration = .seconds(2.5)
 
     var body: some View {
-        ZStack {
-            blurredBackground
-            if let project = store.audio.nowPlaying {
-                VStack(spacing: 0) {
-                    topBar(project: project)
-                    timeline(project: project)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.top, 12)
+        NavigationStack {
+            ZStack {
+                blurredBackground
+                if let project = store.audio.nowPlaying {
+                    VStack(alignment: .leading, spacing: 0) {
+                        titleHeader(project: project)
+                        timeline(project: project)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             // Transport floats over the scroll view; the
                             // timecode row sits beneath it at the screen's
@@ -43,7 +45,7 @@ struct FullPlayerView: View {
                             // these at the end while letting earlier
                             // content scroll past (behind) the glass.
                             VStack(spacing: 0) {
-                                if speech.isRecording {
+                                if speech.isRecording || speech.isLoadingModel || speech.lastErrorMessage != nil {
                                     HStack {
                                         Spacer()
                                         transcriptBubble
@@ -60,9 +62,24 @@ struct FullPlayerView: View {
                                     .padding(.bottom, 8)
                             }
                         }
+                } else {
+                    ProgressView().tint(.white)
                 }
-                .animation(.easeInOut(duration: 0.2), value: speech.isRecording)
-                .sheet(isPresented: $showAddNote) {
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar { playerToolbarContent }
+            .animation(.easeInOut(duration: 0.2), value: speech.isRecording)
+            .animation(.easeInOut(duration: 0.2), value: speech.isLoadingModel)
+            .sheet(isPresented: $showAudioPicker) {
+                if let project = store.audio.nowPlaying {
+                    AudioFilePickerSheet(project: project, store: store)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                }
+            }
+            .sheet(isPresented: $showAddNote) {
+                if let project = store.audio.nowPlaying {
                     AddNoteSheet(
                         project: project,
                         store: store,
@@ -71,7 +88,9 @@ struct FullPlayerView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
                 }
-                .sheet(item: $editingNote) { note in
+            }
+            .sheet(item: $editingNote) { note in
+                if let project = store.audio.nowPlaying {
                     AddNoteSheet(
                         project: project,
                         store: store,
@@ -81,11 +100,64 @@ struct FullPlayerView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
                 }
-            } else {
-                ProgressView().tint(.white)
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    /// Left-aligned large title + version subtitle, rendered in the body
+    /// (not via `.navigationTitle`) so we can control the gap between
+    /// the toolbar buttons and the title. The system large title puts
+    /// the text right under the toolbar with no tunable spacing; this
+    /// gives us the breathing room we want.
+    private func titleHeader(project: ProjectReference) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(project.displayTitle)
+                .font(.largeTitle.bold())
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+            if let version = currentVersionLabel {
+                Text(version)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 20)
+    }
+
+    /// Toolbar items for the player. Star + audio source render together
+    /// as a single Liquid Glass group on the trailing edge; close stands
+    /// alone as its own item (still trailing, sits closer to the edge).
+    @ToolbarContentBuilder
+    private var playerToolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.backward")
+            }
+        }
+        if let project = store.audio.nowPlaying {
+            let isStarred = store.starred[project.id] ?? false
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    Task { await store.toggleStarred(project) }
+                } label: {
+                    Image(systemName: isStarred ? "star.fill" : "star")
+                        .foregroundStyle(isStarred ? Color.yellow : .primary)
+                }
+                Button {
+                    showAudioPicker = true
+                } label: {
+                    Image(systemName: "tray.full")
+                }
+            }
+        }
     }
 
     // MARK: - Background
@@ -107,68 +179,6 @@ struct FullPlayerView: View {
             .overlay(Color.black.opacity(0.45).ignoresSafeArea())
         } else {
             Color.black.ignoresSafeArea()
-        }
-    }
-
-    // MARK: - Top bar
-
-    private func topBar(project: ProjectReference) -> some View {
-        let isStarred = store.starred[project.id] ?? false
-        return ZStack {
-            VStack(spacing: 1) {
-                Text(project.displayTitle)
-                    .font(.headline.weight(.heavy))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                if let version = currentVersionLabel {
-                    Text(version)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .monospacedDigit()
-                }
-            }
-            .padding(.horizontal, 60)
-
-            HStack {
-                Button {
-                    Task { await store.toggleStarred(project) }
-                } label: {
-                    Image(systemName: isStarred ? "star.fill" : "star")
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(isStarred ? Color.yellow : .white.opacity(0.85))
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    showAudioPicker = true
-                } label: {
-                    Image(systemName: "tray.full")
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 36, height: 36)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .glassEffect(.regular.interactive(), in: Circle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .sheet(isPresented: $showAudioPicker) {
-            AudioFilePickerSheet(project: project, store: store)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
         }
     }
 
@@ -500,13 +510,18 @@ struct FullPlayerView: View {
     }
 
     private var idleTransport: some View {
-        ZStack {
-            playPauseButton
+        // Single flat HStack so the play button is a sibling of the
+        // surrounding combos — no overlay, no overlap, unambiguous hit
+        // testing. Liquid Glass coordinates the three glass shapes via
+        // the surrounding GlassEffectContainer.
+        GlassEffectContainer(spacing: 8) {
             HStack {
                 loopAndTrackCombo
                 if showSkipButtons {
                     skipButton(seconds: -10, systemImage: "gobackward.10")
                 }
+                Spacer()
+                playPauseButton
                 Spacer()
                 if showSkipButtons {
                     skipButton(seconds: 10, systemImage: "goforward.10")
@@ -587,15 +602,20 @@ struct FullPlayerView: View {
     }
 
     private var playPauseButton: some View {
+        // `.glassEffect` applied OUTSIDE the Button (not on the Image
+        // inside the label) — when stacked next to other interactive
+        // glass elements in iOS 26, having the effect inside the label
+        // causes taps to register visually but never fire the action.
         Button {
             store.audio.togglePlay()
         } label: {
             Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
                 .foregroundStyle(.white)
                 .frame(width: 68, height: 68)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     private func skipButton(seconds: Double, systemImage: String) -> some View {
@@ -664,28 +684,40 @@ struct FullPlayerView: View {
             Image(systemName: "xmark")
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 52, height: 52)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
     }
 
     private var transcriptBubble: some View {
         HStack(alignment: .top, spacing: 8) {
             Circle()
-                .fill(Color.red)
+                .fill(speech.lastErrorMessage != nil ? Color.orange : Color.red)
                 .frame(width: 8, height: 8)
                 .padding(.top, 6)
                 .symbolEffect(.pulse, options: .repeating, isActive: speech.isRecording)
-            Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript)
+            Text(transcriptBubbleText)
                 .font(.system(size: 14))
                 .foregroundStyle(speech.transcript.isEmpty ? .white.opacity(0.5) : .white)
                 .multilineTextAlignment(.leading)
-                .lineLimit(5)
+                .lineLimit(8)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: 280, alignment: .leading)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture {
+            if speech.lastErrorMessage != nil { speech.clearError() }
+        }
+    }
+
+    private var transcriptBubbleText: String {
+        if let err = speech.lastErrorMessage { return "Error — \(err)" }
+        if speech.isLoadingModel {
+            return speech.isDownloadingModel ? "Downloading speech model…" : "Loading speech model…"
+        }
+        return speech.transcript.isEmpty ? "Listening…" : speech.transcript
     }
 
     private func startRecording() {
@@ -699,19 +731,23 @@ struct FullPlayerView: View {
             store.audio.pause()
             voiceNoteStartTime = store.audio.currentTime
             do {
-                try speech.start()
+                try await speech.start()
             } catch {
-                showAddNote = true
+                // Error message is already on `speech.lastErrorMessage`
+                // and shows in the bubble; user can dismiss with the
+                // cancel button or fall back to the + sheet manually.
             }
         }
     }
 
     private func finishRecording(project: ProjectReference) {
-        let text = speech.stop()
-        guard !text.isEmpty else { return }
-        let tags = NoteTags.matches(in: text)
-        let note = Note(time: voiceNoteStartTime, text: text, tags: tags)
-        Task { await store.addNote(note, to: project) }
+        Task { @MainActor in
+            let text = await speech.stop()
+            guard !text.isEmpty else { return }
+            let tags = NoteTags.matches(in: text)
+            let note = Note(time: voiceNoteStartTime, text: text, tags: tags)
+            await store.addNote(note, to: project)
+        }
     }
 
     private func cancelRecording() {
