@@ -113,6 +113,9 @@ struct ContentView: View {
             Task.detached { [store] in
                 await store.refreshActivityDates()
             }
+            Task.detached { [store] in
+                await store.refreshStaleAlbumArt()
+            }
         }
     }
 }

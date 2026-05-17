@@ -31,12 +31,8 @@ struct FullPlayerView: View {
             ZStack {
                 blurredBackground
                 if let project = store.audio.nowPlaying {
-                    VStack(alignment: .leading, spacing: 0) {
-                        titleHeader(project: project)
-                        timeline(project: project)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    timeline(project: project)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             // Transport floats over the scroll view; the
                             // timecode row sits beneath it at the screen's
@@ -66,6 +62,9 @@ struct FullPlayerView: View {
                     ProgressView().tint(.white)
                 }
             }
+            .navigationTitle(store.audio.nowPlaying?.displayTitle ?? "")
+            .navigationSubtitle(currentVersionLabel ?? "")
+            .toolbarTitleDisplayMode(.large)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar { playerToolbarContent }
@@ -103,31 +102,6 @@ struct FullPlayerView: View {
             }
         }
         .preferredColorScheme(.dark)
-    }
-
-    /// Left-aligned large title + version subtitle, rendered in the body
-    /// (not via `.navigationTitle`) so we can control the gap between
-    /// the toolbar buttons and the title. The system large title puts
-    /// the text right under the toolbar with no tunable spacing; this
-    /// gives us the breathing room we want.
-    private func titleHeader(project: ProjectReference) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(project.displayTitle)
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-            if let version = currentVersionLabel {
-                Text(version)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .monospacedDigit()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 20)
     }
 
     /// Toolbar items for the player. Star + audio source render together
@@ -437,11 +411,15 @@ struct FullPlayerView: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
-                if duration > 0 {
-                    store.audio.seek(to: note.time)
-                }
+                if duration > 0 { store.audio.seek(to: note.time) }
             }
-            .contextMenu {
+            // `contextMenu(menuItems:preview:)` lifts the preview view
+            // onto its own layer over a dimmed backdrop, giving the
+            // menu buttons clear hit isolation from the underlying
+            // note pin's interactive glass — which was the cause of
+            // the "buttons hard to press" problem when we relied on
+            // the plain `.contextMenu(menuItems:)` form.
+            .contextMenu(menuItems: {
                 Button {
                     editingNote = note
                 } label: {
@@ -452,7 +430,34 @@ struct FullPlayerView: View {
                 } label: {
                     Label("Delete note", systemImage: "trash")
                 }
-            }
+            }, preview: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(timecode(note.time))
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .tracking(0.4)
+                    Text(note.text)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                    if !note.tags.isEmpty {
+                        FlowLayout(spacing: 4) {
+                            ForEach(note.tags, id: \.self) { tag in
+                                let color = NoteTags.color(for: tag)
+                                Text(tag)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(color)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(color.opacity(0.18))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: 300, alignment: .leading)
+                .background(Color(white: 0.12))
+            })
             .padding(.trailing, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

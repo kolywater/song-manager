@@ -61,7 +61,24 @@ final class DropboxProjectSource: ProjectSource {
         try? data.write(to: storageURL, options: .atomic)
     }
 
-    func fetchAlbumArt(forFolderPath folderPath: String, songName: String) async throws -> Data? {
+    func fetchAlbumArt(forFolderPath folderPath: String, songName: String) async throws -> (data: Data, modified: Date)? {
+        guard let chosen = try await findAlbumArtFile(folderPath: folderPath, songName: songName) else {
+            return nil
+        }
+        let downloadPath = chosen.pathLower ?? (folderPath + "/_ALBUM ART/" + chosen.name)
+        let data = try await downloadFile(path: downloadPath)
+        return (data, chosen.clientModified)
+    }
+
+    /// Light-weight: lists `_ALBUM ART/`, picks the same file
+    /// `fetchAlbumArt` would, but skips the download. Used to decide
+    /// whether the cached art is stale before paying the bandwidth cost
+    /// of refetching.
+    func fetchAlbumArtModified(forFolderPath folderPath: String, songName: String) async throws -> Date? {
+        try await findAlbumArtFile(folderPath: folderPath, songName: songName)?.clientModified
+    }
+
+    private func findAlbumArtFile(folderPath: String, songName: String) async throws -> Files.FileMetadata? {
         let artFolderPath = folderPath + "/_ALBUM ART"
         let entries: [Files.Metadata]
         do {
@@ -84,11 +101,7 @@ final class DropboxProjectSource: ProjectSource {
             let stem = (file.name as NSString).deletingPathExtension.lowercased()
             return stem == officialStem
         }
-        let chosen = official ?? images.sorted { $0.clientModified > $1.clientModified }.first
-        guard let chosen else { return nil }
-
-        let downloadPath = chosen.pathLower ?? (artFolderPath + "/" + chosen.name)
-        return try await downloadFile(path: downloadPath)
+        return official ?? images.sorted { $0.clientModified > $1.clientModified }.first
     }
 
     /// Returns the most recent clientModified date across the project's

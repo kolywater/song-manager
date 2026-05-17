@@ -645,9 +645,16 @@ final class SongStore {
         defer { artInFlight.remove(project.id) }
 
         do {
-            guard let data = try await source.fetchAlbumArt(forFolderPath: folderPath, songName: project.displayName),
-                  let image = UIImage(data: data) else { return }
-            try? data.write(to: cacheURL, options: .atomic)
+            guard let fetched = try await source.fetchAlbumArt(forFolderPath: folderPath, songName: project.displayName),
+                  let image = UIImage(data: fetched.data) else { return }
+            try? fetched.data.write(to: cacheURL, options: .atomic)
+            // Stamp the cache file's modification date with the
+            // Dropbox file's clientModified so we can later compare
+            // against the remote without storing a sidecar.
+            try? FileManager.default.setAttributes(
+                [.modificationDate: fetched.modified],
+                ofItemAtPath: cacheURL.path
+            )
             albumArt[project.id] = image
             // Note: skipping applyArtSummary — the only consumer (pillOverlay) is hidden.
         } catch {
@@ -658,6 +665,48 @@ final class SongStore {
                case .authExpired = dbx {
                 handleDropboxError(error)
             }
+        }
+    }
+
+    /// For every project, list its `_ALBUM ART/` folder and check
+    /// whether the chosen file's `clientModified` is newer than the
+    /// local cache file's mtime. If so, drop the cache + redownload.
+    /// Quiet on errors — this runs in the background and the user
+    /// shouldn't see anything fail just because they opened the app
+    /// without Dropbox connectivity.
+    func refreshStaleAlbumArt() async {
+        guard let source else { return }
+        let fm = FileManager.default
+        // Snapshot the project list before suspending; the array may
+        // change while we're iterating.
+        let snapshot = projects
+        for project in snapshot {
+            guard case .dropboxPath(let folderPath) = project.location else { continue }
+            let cacheURL = Self.albumArtCacheURL(for: project.id)
+            let cacheMtime = (try? fm.attributesOfItem(atPath: cacheURL.path)[.modificationDate]) as? Date
+
+            let remoteMtime: Date?
+            do {
+                remoteMtime = try await source.fetchAlbumArtModified(
+                    forFolderPath: folderPath,
+                    songName: project.displayName
+                )
+            } catch {
+                if let dbx = error as? DropboxProjectSource.DropboxSourceError,
+                   case .authExpired = dbx {
+                    await MainActor.run { handleDropboxError(error) }
+                    return
+                }
+                continue
+            }
+
+            guard let remoteMtime else { continue }
+            // Refresh when there's no cache OR remote is newer than
+            // what we last downloaded. Allow a 1-second slop because
+            // filesystem mtimes round and Dropbox dates don't.
+            let stale = (cacheMtime.map { remoteMtime > $0.addingTimeInterval(1) } ?? true)
+            guard stale else { continue }
+            await refreshAlbumArt(for: project)
         }
     }
 }
