@@ -5,6 +5,7 @@ struct FullPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrubProgress: Double? = nil
     @State private var showAddNote: Bool = false
+    @State private var editingNote: Note?
     @State private var speech = SpeechRecognitionService()
     @State private var voiceNoteStartTime: Double = 0
     @State private var showAudioPicker: Bool = false
@@ -56,6 +57,16 @@ struct FullPlayerView: View {
                         project: project,
                         store: store,
                         currentTime: store.audio.currentTime
+                    )
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                }
+                .sheet(item: $editingNote) { note in
+                    AddNoteSheet(
+                        project: project,
+                        store: store,
+                        currentTime: note.time,
+                        editing: note
                     )
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
@@ -414,6 +425,11 @@ struct FullPlayerView: View {
                 }
             }
             .contextMenu {
+                Button {
+                    editingNote = note
+                } label: {
+                    Label("Edit note", systemImage: "pencil")
+                }
                 Button(role: .destructive) {
                     Task { await store.removeNote(note, from: project) }
                 } label: {

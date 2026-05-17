@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var store = SongStore()
     @State private var showAddSheet = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -102,6 +103,15 @@ struct ContentView: View {
         .task {
             if DevHarness.autoOpenPlayer, let first = store.projects.first {
                 await store.play(first)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Detached: the refresh fans out Dropbox calls and shouldn't
+            // hold up scene activation. The await points inside suspend
+            // on network I/O, so main isn't blocked either way.
+            guard phase == .active else { return }
+            Task.detached { [store] in
+                await store.refreshActivityDates()
             }
         }
     }

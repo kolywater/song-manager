@@ -13,14 +13,17 @@ Build for device, then install:
 cd "/Users/aiden/Software/Song Manager"
 
 xcodebuild -project "Song Manager.xcodeproj" -scheme "Song Manager iOS" \
-  -destination "generic/platform=iOS" -configuration Debug build
+  -destination "generic/platform=iOS" -configuration Debug \
+  -allowProvisioningUpdates build
 
 ios-deploy --bundle "/Users/aiden/Library/Developer/Xcode/DerivedData/Song_Manager-eotmzyrsvotgbhcyhgwpeymxojhk/Build/Products/Debug-iphoneos/Song Manager iOS.app"
 ```
 
-Free provisioning expires after 7 days — re-run these to refresh, and
-re-trust the developer profile in Settings → General → VPN & Device
-Management if iOS prompts for it.
+Free provisioning expires after 7 days. `-allowProvisioningUpdates`
+lets xcodebuild auto-renew the profile in place; without it the build
+fails with "No profiles for 'com.personal.Song-Manager.iOS' were
+found." Re-trust the developer profile in Settings → General → VPN &
+Device Management if iOS prompts for it.
 
 ## iOS deploy to simulator
 

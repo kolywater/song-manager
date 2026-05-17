@@ -476,6 +476,22 @@ final class SongStore {
         await persistDoc(for: project, source: source)
     }
 
+    /// Replace an existing note in place (matched by id). Falls back to
+    /// append if the note isn't found, so a stale edit session doesn't
+    /// silently lose changes.
+    func updateNote(_ note: Note, in project: ProjectReference) async {
+        guard let source else { return }
+        var current = notes[project.id] ?? []
+        if let idx = current.firstIndex(where: { $0.id == note.id }) {
+            current[idx] = note
+        } else {
+            current.append(note)
+        }
+        current.sort { $0.time < $1.time }
+        notes[project.id] = current
+        await persistDoc(for: project, source: source)
+    }
+
     func toggleStarred(_ project: ProjectReference) async {
         starred[project.id] = !(starred[project.id] ?? false)
         saveStarredToDisk()
