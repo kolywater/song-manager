@@ -35,21 +35,31 @@ struct FullPlayerView: View {
                     timeline(project: project)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, 12)
-                    timeDisplay
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 6)
-                    if speech.isRecording {
-                        HStack {
-                            Spacer()
-                            transcriptBubble
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            // Transport floats over the scroll view; the
+                            // timecode row sits beneath it at the screen's
+                            // bottom edge. safeAreaInset gives the scroll
+                            // content the bottom padding it needs to clear
+                            // these at the end while letting earlier
+                            // content scroll past (behind) the glass.
+                            VStack(spacing: 0) {
+                                if speech.isRecording {
+                                    HStack {
+                                        Spacer()
+                                        transcriptBubble
+                                    }
+                                    .padding(.horizontal, 24)
+                                    .padding(.bottom, 10)
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                }
+                                transport(project: project)
+                                    .padding(.horizontal, 24)
+                                    .padding(.bottom, 8)
+                                timeDisplay
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 8)
+                            }
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 10)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-                    transport(project: project)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 28)
                 }
                 .animation(.easeInOut(duration: 0.2), value: speech.isRecording)
                 .sheet(isPresented: $showAddNote) {
@@ -124,7 +134,6 @@ struct FullPlayerView: View {
                     Task { await store.toggleStarred(project) }
                 } label: {
                     Image(systemName: isStarred ? "star.fill" : "star")
-                        .font(.body.weight(.semibold))
                         .frame(width: 36, height: 36)
                         .foregroundStyle(isStarred ? Color.yellow : .white.opacity(0.85))
                         .glassEffect(.regular.interactive(), in: Circle())
@@ -137,7 +146,6 @@ struct FullPlayerView: View {
                     showAudioPicker = true
                 } label: {
                     Image(systemName: "tray.full")
-                        .font(.body.weight(.semibold))
                         .frame(width: 36, height: 36)
                         .foregroundStyle(.white.opacity(0.85))
                         .glassEffect(.regular.interactive(), in: Circle())
@@ -148,7 +156,6 @@ struct FullPlayerView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.body.weight(.semibold))
                         .frame(width: 36, height: 36)
                         .foregroundStyle(.white.opacity(0.85))
                         .glassEffect(.regular.interactive(), in: Circle())
@@ -544,7 +551,6 @@ struct FullPlayerView: View {
                 Task { await store.playPrevious() }
             } label: {
                 Image(systemName: "backward.fill")
-                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 52, height: 52)
                     .contentShape(Rectangle())
@@ -559,7 +565,6 @@ struct FullPlayerView: View {
                 Task { await store.playNext() }
             } label: {
                 Image(systemName: "forward.fill")
-                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 52, height: 52)
                     .contentShape(Rectangle())
@@ -574,7 +579,6 @@ struct FullPlayerView: View {
             store.audio.toggleLoop()
         } label: {
             Image(systemName: "repeat")
-                .font(.title2)
                 .foregroundStyle(store.audio.isLooping ? .white : .white.opacity(0.5))
                 .frame(width: 52, height: 52)
                 .glassEffect(.regular.interactive(), in: Circle())
@@ -587,7 +591,6 @@ struct FullPlayerView: View {
             store.audio.togglePlay()
         } label: {
             Image(systemName: store.audio.isPlaying ? "pause.fill" : "play.fill")
-                .font(.title.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 68, height: 68)
                 .glassEffect(.regular.interactive(), in: Circle())
@@ -600,7 +603,6 @@ struct FullPlayerView: View {
             store.audio.skip(by: seconds)
         } label: {
             Image(systemName: systemImage)
-                .font(.title2)
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 52, height: 52)
                 .glassEffect(.regular.interactive(), in: Circle())
@@ -616,7 +618,6 @@ struct FullPlayerView: View {
                 startRecording()
             } label: {
                 Image(systemName: "mic.fill")
-                    .font(.title2)
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 60, height: 52)
                     .contentShape(Rectangle())
@@ -632,7 +633,6 @@ struct FullPlayerView: View {
                 showAddNote = true
             } label: {
                 Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 60, height: 52)
                     .contentShape(Rectangle())
@@ -649,7 +649,6 @@ struct FullPlayerView: View {
             finishRecording(project: project)
         } label: {
             Image(systemName: "stop.fill")
-                .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
                 .background(Circle().fill(Color.red))
@@ -663,7 +662,6 @@ struct FullPlayerView: View {
             cancelRecording()
         } label: {
             Image(systemName: "xmark")
-                .font(.title3)
                 .foregroundStyle(.white.opacity(0.85))
                 .frame(width: 52, height: 52)
                 .glassEffect(.regular.interactive(), in: Circle())
