@@ -116,6 +116,9 @@ struct ContentView: View {
             Task.detached { [store] in
                 await store.refreshStaleAlbumArt()
             }
+            Task.detached { [store] in
+                await store.refreshCurrentAudio()
+            }
         }
     }
 }

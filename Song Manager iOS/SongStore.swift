@@ -33,6 +33,10 @@ final class SongStore {
     var notes: [UUID: [Note]] = [:]
     var starred: [UUID: Bool] = [:]
     var selectedAudioPath: [UUID: String] = [:]
+    /// Newest-bounce modDate captured when each project's audio was
+    /// pinned. A sticky pin auto-releases once a bounce newer than this
+    /// appears. See `resolveAudio`.
+    var pinWatermark: [UUID: Date] = [:]
     var audioFiles: [UUID: [AudioFileMeta]] = [:]
     let audio = AudioService()
     let waveform = WaveformService()
@@ -68,6 +72,7 @@ final class SongStore {
         activityDates = Self.loadActivityDatesFromDisk()
         starred = Self.loadStarredFromDisk()
         selectedAudioPath = Self.loadSelectedAudioFromDisk()
+        pinWatermark = Self.loadPinWatermarkFromDisk()
         if source != nil {
             Task { [weak self] in
                 await self?.refreshActivityDates()
@@ -144,6 +149,31 @@ final class SongStore {
         let dict = Dictionary(uniqueKeysWithValues: selectedAudioPath.map { ($0.key.uuidString, $0.value) })
         guard let data = try? JSONEncoder().encode(dict) else { return }
         try? data.write(to: Self.selectedAudioCacheURL(), options: .atomic)
+    }
+
+    private static func pinWatermarkCacheURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appending(path: "iosPinWatermark.json")
+    }
+
+    /// Local mirror of NotesDocument.pinWatermark so the sticky-pin
+    /// release check has a baseline available before the Dropbox doc
+    /// loads. Canonical store is the per-song NotesDocument.
+    private static func loadPinWatermarkFromDisk() -> [UUID: Date] {
+        guard let data = try? Data(contentsOf: pinWatermarkCacheURL()),
+              let dict = try? JSONDecoder().decode([String: Date].self, from: data)
+        else { return [:] }
+        var out: [UUID: Date] = [:]
+        for (key, value) in dict {
+            if let id = UUID(uuidString: key) { out[id] = value }
+        }
+        return out
+    }
+
+    private func savePinWatermarkToDisk() {
+        let dict = Dictionary(uniqueKeysWithValues: pinWatermark.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(dict) else { return }
+        try? data.write(to: Self.pinWatermarkCacheURL(), options: .atomic)
     }
 
     /// Local-only cache of starred state, keyed by project UUID. The
@@ -352,7 +382,7 @@ final class SongStore {
                     audio.load(url: playbackURL, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
                     Task { [weak self] in
                         guard let self else { return }
-                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL)
+                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL, audioKey: bounce.filename)
                     }
                     Task { [weak self] in
                         guard let self else { return }
@@ -375,7 +405,7 @@ final class SongStore {
             audio.load(url: cached.url, project: project, filename: cached.filename, artwork: albumArt[project.id], autoStart: autoStart)
             Task { [weak self] in
                 guard let self else { return }
-                await self.waveform.loadWaveform(for: project, audioURL: cached.url)
+                await self.waveform.loadWaveform(for: project, audioURL: cached.url, audioKey: cached.filename)
             }
             return
         }
@@ -450,6 +480,10 @@ final class SongStore {
                 selectedAudioPath[project.id] = doc.selectedAudioPath
                 saveSelectedAudioToDisk()
             }
+            if pinWatermark[project.id] != doc.pinWatermark {
+                pinWatermark[project.id] = doc.pinWatermark
+                savePinWatermarkToDisk()
+            }
         } catch {
             notes[project.id] = []
         }
@@ -503,7 +537,8 @@ final class SongStore {
         let doc = NotesDocument(
             notes: notes[project.id] ?? [],
             starred: starred[project.id] ?? false,
-            selectedAudioPath: selectedAudioPath[project.id]
+            selectedAudioPath: selectedAudioPath[project.id],
+            pinWatermark: pinWatermark[project.id]
         )
         do {
             try await source.saveNotes(doc, for: project)
@@ -527,14 +562,48 @@ final class SongStore {
         }
     }
 
-    /// Persist the user's audio choice for a project and reload playback
-    /// from the new file.
+    /// Pin the user's audio choice for a project and reload playback from
+    /// the new file. The pin is sticky: we stamp it with the newest
+    /// bounce's modDate so it auto-releases once a *newer* bounce lands
+    /// (see `resolveAudio`). `.distantPast` when there are no bounces yet,
+    /// so the first bounce to appear releases the pin.
     func selectAudioFile(_ file: AudioFileMeta, for project: ProjectReference) async {
         guard let source else { return }
         selectedAudioPath[project.id] = file.relativePath
+        pinWatermark[project.id] = await newestBounceModDate(for: project, source: source) ?? .distantPast
         saveSelectedAudioToDisk()
+        savePinWatermarkToDisk()
         await persistDoc(for: project, source: source)
         await loadAndPlay(project: project, autoStart: audio.isPlaying)
+    }
+
+    /// Clear an explicit pin and return the project to the default
+    /// "latest bounce" behavior, reloading playback.
+    func clearAudioSelection(for project: ProjectReference) async {
+        guard let source else { return }
+        await releasePin(for: project, source: source)
+        await loadAndPlay(project: project, autoStart: audio.isPlaying)
+    }
+
+    /// Drop the pin + watermark for a project and persist. Used both by
+    /// the explicit "Latest (auto)" action and the automatic release in
+    /// `resolveAudio` when a newer bounce appears.
+    private func releasePin(for project: ProjectReference, source: DropboxProjectSource) async {
+        selectedAudioPath[project.id] = nil
+        pinWatermark[project.id] = nil
+        saveSelectedAudioToDisk()
+        savePinWatermarkToDisk()
+        await persistDoc(for: project, source: source)
+    }
+
+    /// modDate of the newest bounce, preferring the already-loaded list to
+    /// avoid a round trip. Falls back to a fresh Dropbox lookup.
+    private func newestBounceModDate(for project: ProjectReference, source: DropboxProjectSource) async -> Date? {
+        if let cached = audioFiles[project.id]?.filter({ !$0.isMaster }).map(\.modDate).max() {
+            return cached
+        }
+        guard case .dropboxPath(let folderPath) = project.location else { return nil }
+        return await source.latestBounce(forFolderPath: folderPath)?.modDate
     }
 
     /// Reloads audio for an already-presented player, honoring the
@@ -550,7 +619,7 @@ final class SongStore {
                     audio.load(url: playbackURL, project: project, filename: bounce.filename, artwork: albumArt[project.id], autoStart: autoStart)
                     Task { [weak self] in
                         guard let self else { return }
-                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL)
+                        await self.waveform.loadWaveform(for: project, audioURL: playbackURL, audioKey: bounce.filename)
                     }
                     return
                 }
@@ -564,7 +633,7 @@ final class SongStore {
             audio.load(url: cached.url, project: project, filename: cached.filename, artwork: albumArt[project.id], autoStart: autoStart)
             Task { [weak self] in
                 guard let self else { return }
-                await self.waveform.loadWaveform(for: project, audioURL: cached.url)
+                await self.waveform.loadWaveform(for: project, audioURL: cached.url, audioKey: cached.filename)
             }
             return
         }
@@ -572,16 +641,69 @@ final class SongStore {
         errorMessage = "No offline copy of \(project.displayName)"
     }
 
+    /// On foreground, re-resolve the audio for whatever's loaded in the
+    /// player and reload it if a newer bounce has appeared on Dropbox.
+    /// `resolveAudio` handles both the default "latest bounce" case and a
+    /// sticky pin that has gone stale — so a version uploaded while the
+    /// app was backgrounded (e.g. 8.9.2 → 8.9.3) gets picked up either
+    /// way. Quiet on failure: a foreground refresh shouldn't surface
+    /// transient network errors.
+    func refreshCurrentAudio() async {
+        guard let project = audio.nowPlaying,
+              case .dropboxPath(let folderPath) = project.location,
+              let source else { return }
+        do {
+            guard let resolved = try await resolveAudio(source: source, project: project, folderPath: folderPath) else { return }
+            // Only reload when the resolved file differs from what's
+            // loaded — otherwise we'd needlessly reset playback position.
+            guard resolved.filename != audio.currentTrackFilename,
+                  audio.nowPlaying?.id == project.id else { return }
+            let playbackURL = cachedOrStream(bounce: resolved, project: project)
+            audio.load(url: playbackURL, project: project, filename: resolved.filename, artwork: albumArt[project.id], autoStart: audio.isPlaying)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.waveform.loadWaveform(for: project, audioURL: playbackURL, audioKey: resolved.filename)
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.loadAudioFiles(for: project)
+            }
+        } catch {
+            // Swallow — keep playing whatever's loaded.
+        }
+    }
+
     /// Resolve which audio to play for a given project. If the user has
-    /// picked a file (and it still exists), use that; otherwise fall back
-    /// to the latest bounce — same default the Mac uses when no master is
-    /// selected.
+    /// pinned a file (and it still exists), use that — unless the pin has
+    /// gone stale, i.e. a bounce newer than the pin watermark has landed,
+    /// in which case the pin auto-releases to the latest bounce. With no
+    /// pin we fall back to the latest bounce — the same default the Mac
+    /// uses when no master is selected.
     private func resolveAudio(
         source: DropboxProjectSource,
         project: ProjectReference,
         folderPath: String
     ) async throws -> (url: URL, filename: String, relativePath: String)? {
         if let selected = selectedAudioPath[project.id] {
+            // `latestBounce` returns nil when offline; in that case we
+            // skip the staleness check entirely and just honor the pin.
+            if let latest = await source.latestBounce(forFolderPath: folderPath) {
+                if let watermark = pinWatermark[project.id] {
+                    // 1s slop: filesystem mtimes round, Dropbox dates don't.
+                    if latest.modDate > watermark.addingTimeInterval(1) {
+                        await releasePin(for: project, source: source)
+                        return try await source.fetchLatestBounceURL(forFolderPath: folderPath)
+                    }
+                } else {
+                    // Legacy pin from before watermarks existed: adopt the
+                    // current latest as the baseline so it starts tracking
+                    // newer bounces from here on (instead of staying pinned
+                    // forever).
+                    pinWatermark[project.id] = latest.modDate
+                    savePinWatermarkToDisk()
+                    await persistDoc(for: project, source: source)
+                }
+            }
             if let result = try await source.fetchAudioURL(forFolderPath: folderPath, relativePath: selected) {
                 return (result.url, result.filename, selected)
             }

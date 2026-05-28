@@ -192,11 +192,19 @@ final class DropboxProjectSource: ProjectSource {
         }
     }
 
+    /// The newest bounce's metadata (including its modDate), or nil if
+    /// there are no bounces / the listing failed. Used to decide whether a
+    /// sticky pin should auto-release. Cheap: lists `bounces/` without
+    /// resolving a temporary link.
+    func latestBounce(forFolderPath folderPath: String) async -> AudioFileMeta? {
+        let files = await listAudioFiles(at: folderPath + "/bounces", folderPath: folderPath, isMaster: false, recursive: false)
+        return files.first
+    }
+
     /// Convenience: pick the latest bounce when no explicit selection
     /// has been made. Mirrors the Mac default.
     func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String, relativePath: String)? {
-        let files = await listAudioFiles(at: folderPath + "/bounces", folderPath: folderPath, isMaster: false, recursive: false)
-        guard let latest = files.first else { return nil }
+        guard let latest = await latestBounce(forFolderPath: folderPath) else { return nil }
         let url = try await getTemporaryLink(path: folderPath + "/" + latest.relativePath)
         return (url, latest.filename, latest.relativePath)
     }

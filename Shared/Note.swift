@@ -28,12 +28,19 @@ struct NotesDocument: Codable {
     /// (e.g. "bounces/MySong 1.3.wav" or "_MASTERS/master.wav"). nil =
     /// fall back to the latest bounce.
     var selectedAudioPath: String?
+    /// modDate of the newest bounce at the moment `selectedAudioPath` was
+    /// pinned. The pin is "sticky": it holds until a bounce newer than
+    /// this watermark appears, then auto-releases back to the latest
+    /// bounce. nil when nothing is pinned (or for legacy pins predating
+    /// this field — those adopt a watermark on first resolve).
+    var pinWatermark: Date?
 
-    init(notes: [Note] = [], starred: Bool = false, selectedAudioPath: String? = nil) {
+    init(notes: [Note] = [], starred: Bool = false, selectedAudioPath: String? = nil, pinWatermark: Date? = nil) {
         self.version = 2
         self.notes = notes
         self.starred = starred
         self.selectedAudioPath = selectedAudioPath
+        self.pinWatermark = pinWatermark
     }
 
     init(from decoder: Decoder) throws {
@@ -42,9 +49,10 @@ struct NotesDocument: Codable {
         self.notes = try c.decodeIfPresent([Note].self, forKey: .notes) ?? []
         self.starred = try c.decodeIfPresent(Bool.self, forKey: .starred) ?? false
         self.selectedAudioPath = try c.decodeIfPresent(String.self, forKey: .selectedAudioPath)
+        self.pinWatermark = try c.decodeIfPresent(Date.self, forKey: .pinWatermark)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case version, notes, starred, selectedAudioPath
+        case version, notes, starred, selectedAudioPath, pinWatermark
     }
 }

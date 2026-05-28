@@ -14,6 +14,9 @@ struct AudioFilePickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    autoRow
+                }
                 if !masters.isEmpty {
                     Section("Masters") {
                         ForEach(masters) { row(for: $0) }
@@ -47,6 +50,36 @@ struct AudioFilePickerSheet: View {
         .task {
             await store.loadAudioFiles(for: project)
         }
+    }
+
+    /// Default behavior: no explicit pin. Plays the latest bounce and
+    /// moves to a newer one automatically as it's added. Selecting any
+    /// file below pins it (sticky until something newer lands); tapping
+    /// this row clears the pin.
+    private var autoRow: some View {
+        let isAuto = selectedPath == nil
+        return Button {
+            Task { await store.clearAudioSelection(for: project) }
+            dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Latest bounce")
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    Text("Follows new bounces automatically")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isAuto {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func row(for file: AudioFileMeta) -> some View {
