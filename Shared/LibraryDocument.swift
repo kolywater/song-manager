@@ -35,17 +35,25 @@ struct LibraryEntry: Codable, Equatable, Identifiable {
     /// fetching the per-song NotesDocument is async and would flash
     /// the title visible before hiding it.
     var hideTitle: Bool
+    /// Workflow status (in-progress / released / idle). Lives on the
+    /// LibraryEntry — not the per-song NotesDocument — for the same
+    /// reason as `hideTitle`: the home grid uses it as the top-level
+    /// grouping key and must know on first paint, before any per-song
+    /// doc has loaded. Missing on decode → `.inProgress` so existing
+    /// libraries silently land every song in the top group.
+    var status: SongStatus
 
     var id: String { displayName.lowercased() }
 
-    init(displayName: String, addedAt: Date, hideTitle: Bool = false) {
+    init(displayName: String, addedAt: Date, hideTitle: Bool = false, status: SongStatus = .inProgress) {
         self.displayName = displayName
         self.addedAt = addedAt
         self.hideTitle = hideTitle
+        self.status = status
     }
 
     private enum CodingKeys: String, CodingKey {
-        case displayName, addedAt, hideTitle
+        case displayName, addedAt, hideTitle, status
     }
 
     init(from decoder: Decoder) throws {
@@ -53,5 +61,6 @@ struct LibraryEntry: Codable, Equatable, Identifiable {
         self.displayName = try c.decode(String.self, forKey: .displayName)
         self.addedAt = try c.decode(Date.self, forKey: .addedAt)
         self.hideTitle = try c.decodeIfPresent(Bool.self, forKey: .hideTitle) ?? false
+        self.status = try c.decodeIfPresent(SongStatus.self, forKey: .status) ?? .inProgress
     }
 }

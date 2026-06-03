@@ -10,32 +10,60 @@ struct ContentView: View {
         GridItem(.flexible(), spacing: 12)
     ]
 
+    @ViewBuilder
+    private func sectionHeader(_ section: ProjectSection) -> some View {
+        Text(section.title)
+            .font(.title2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.top, 14)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func contextMenu(for project: ProjectReference) -> some View {
+        let currentStatus = store.status[project.id] ?? .inProgress
+        ForEach(SongStatus.allCases) { s in
+            Button {
+                Task { await store.setStatus(s, for: project) }
+            } label: {
+                Label(s.displayName, systemImage: currentStatus == s ? "checkmark" : s.systemImage)
+            }
+        }
+        Divider()
+        Button {
+            Task { await store.toggleHideTitle(project) }
+        } label: {
+            let hidden = store.hideTitle[project.id] == true
+            Label(hidden ? "Show title" : "Hide title",
+                  systemImage: hidden ? "textformat" : "textformat.alt")
+        }
+        Button {
+            Task { await store.refreshAlbumArt(for: project) }
+        } label: {
+            Label("Refresh artwork", systemImage: "arrow.clockwise")
+        }
+        Button(role: .destructive) {
+            store.removeProject(project)
+        } label: {
+            Label("Remove from Library", systemImage: "trash")
+        }
+    }
+
     var body: some View {
         @Bindable var store = store
         NavigationStack {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(store.sortedProjects) { project in
-                        SongCard(project: project, store: store)
-                            .contextMenu {
-                                Button {
-                                    Task { await store.toggleHideTitle(project) }
-                                } label: {
-                                    let hidden = store.hideTitle[project.id] == true
-                                    Label(hidden ? "Show title" : "Hide title",
-                                          systemImage: hidden ? "textformat" : "textformat.alt")
-                                }
-                                Button {
-                                    Task { await store.refreshAlbumArt(for: project) }
-                                } label: {
-                                    Label("Refresh artwork", systemImage: "arrow.clockwise")
-                                }
-                                Button(role: .destructive) {
-                                    store.removeProject(project)
-                                } label: {
-                                    Label("Remove from Library", systemImage: "trash")
-                                }
+                    ForEach(store.projectSections) { section in
+                        Section {
+                            ForEach(section.projects) { project in
+                                SongCard(project: project, store: store)
+                                    .contextMenu { contextMenu(for: project) }
                             }
+                        } header: {
+                            sectionHeader(section)
+                        }
                     }
                 }
                 .padding(.horizontal, 18)
@@ -107,6 +135,7 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $store.presentingFullPlayer) {
             FullPlayerView(store: store)
         }
+        .animation(.easeInOut(duration: 0.2), value: store.projectSections.map(\.id))
         .task {
             if DevHarness.autoOpenPlayer, let first = store.projects.first {
                 await store.play(first)

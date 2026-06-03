@@ -25,6 +25,10 @@ final class SongStore {
     /// Mac-local — iOS doesn't have an equivalent concept yet so we
     /// don't push this into NotesDocument.
     var hideTitle: [UUID: Bool] = [:]
+    /// Per-song workflow status. Mirrors iOS — canonical store is the
+    /// `LibraryEntry` on Dropbox. Missing keys resolve to `.inProgress`
+    /// at read time so legacy songs land in the top group.
+    var status: [UUID: SongStatus] = [:]
     var selectedAudioPath: [UUID: String] = [:]
     /// Newest-bounce modDate captured when each project's audio was
     /// pinned. A sticky pin auto-releases once a bounce newer than this
@@ -54,6 +58,7 @@ final class SongStore {
         activityDates = Self.loadActivityDatesFromDisk()
         starred = Self.loadStarredFromDisk()
         hideTitle = Self.loadHideTitleFromDisk()
+        status = Self.loadStatusFromDisk()
         selectedAudioPath = Self.loadSelectedAudioFromDisk()
         pinWatermark = Self.loadPinWatermarkFromDisk()
         if source != nil {
@@ -143,7 +148,12 @@ final class SongStore {
 
     // MARK: - Sorted view
 
-    var sortedProjects: [ProjectReference] {
+    /// The home grid's display order — a starred-first "Starred" group
+    /// floats above the three status groups (in-progress, released, idle).
+    /// Within each section the current sortMode (Recent / A–Z) orders
+    /// the cards. Sections with zero entries are omitted so empty
+    /// headers never render.
+    var projectSections: [ProjectSection] {
         let base: [ProjectReference]
         switch sortMode {
         case .recent:
@@ -157,11 +167,29 @@ final class SongStore {
                 $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
         }
-        // Starred-first partition — matches iOS so prev/next nav agrees
-        // with the on-screen order.
-        let starredFirst = base.filter { starred[$0.id] == true }
+
+        // Starred floats above all status groups regardless of status.
+        let starredItems = base.filter { starred[$0.id] == true }
         let rest = base.filter { starred[$0.id] != true }
-        return starredFirst + rest
+
+        var sections: [ProjectSection] = []
+        if !starredItems.isEmpty {
+            sections.append(ProjectSection(kind: .starred, projects: starredItems))
+        }
+        for s in SongStatus.allCases {
+            let items = rest.filter { (status[$0.id] ?? .inProgress) == s }
+            if !items.isEmpty {
+                sections.append(ProjectSection(kind: .status(s), projects: items))
+            }
+        }
+        return sections
+    }
+
+    /// Flat display order, matching the visual order of `projectSections`.
+    /// Used by player prev/next so navigation walks the grid as the user
+    /// sees it.
+    var sortedProjects: [ProjectReference] {
+        projectSections.flatMap(\.projects)
     }
 
     // MARK: - Folder picker
@@ -208,12 +236,14 @@ final class SongStore {
         notes.removeValue(forKey: project.id)
         starred.removeValue(forKey: project.id)
         hideTitle.removeValue(forKey: project.id)
+        status.removeValue(forKey: project.id)
         selectedAudioPath.removeValue(forKey: project.id)
         pinWatermark.removeValue(forKey: project.id)
         audioFiles.removeValue(forKey: project.id)
         saveActivityDates()
         saveStarredToDisk()
         saveHideTitleToDisk()
+        saveStatusToDisk()
         saveSelectedAudioToDisk()
         savePinWatermarkToDisk()
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
@@ -229,7 +259,8 @@ final class SongStore {
             LibraryEntry(
                 displayName: project.displayName,
                 addedAt: Date(),
-                hideTitle: hideTitle[project.id] ?? false
+                hideTitle: hideTitle[project.id] ?? false,
+                status: status[project.id] ?? .inProgress
             )
         }
         let doc = LibraryDocument(modifiedAt: Date(), items: items)
@@ -269,6 +300,7 @@ final class SongStore {
         )
         var rebuilt: [ProjectReference] = []
         var hideTitleDirty = false
+        var statusDirty = false
         for entry in remote.items {
             let key = entry.displayName.lowercased()
             let project: ProjectReference
@@ -288,17 +320,24 @@ final class SongStore {
                 hideTitle[project.id] = entry.hideTitle
                 hideTitleDirty = true
             }
+            if (status[project.id] ?? .inProgress) != entry.status {
+                status[project.id] = entry.status
+                statusDirty = true
+            }
         }
         let keptIDs = Set(rebuilt.map(\.id))
         for project in projects where !keptIDs.contains(project.id) {
             albumArt.removeValue(forKey: project.id)
             activityDates.removeValue(forKey: project.id)
             hideTitle.removeValue(forKey: project.id)
+            status.removeValue(forKey: project.id)
             try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
             waveform.invalidate(for: project.id)
             hideTitleDirty = true
+            statusDirty = true
         }
         if hideTitleDirty { saveHideTitleToDisk() }
+        if statusDirty { saveStatusToDisk() }
         projects = rebuilt
     }
 
@@ -474,6 +513,33 @@ final class SongStore {
     }
     private static func hideTitleCacheURL() -> URL {
         appSupportDir().appending(path: "macHideTitle.json")
+    }
+    private static func statusCacheURL() -> URL {
+        appSupportDir().appending(path: "macStatus.json")
+    }
+
+    private static func loadStatusFromDisk() -> [UUID: SongStatus] {
+        guard let data = try? Data(contentsOf: statusCacheURL()),
+              let dict = try? JSONDecoder().decode([String: SongStatus].self, from: data) else { return [:] }
+        var out: [UUID: SongStatus] = [:]
+        for (key, value) in dict {
+            if let id = UUID(uuidString: key) { out[id] = value }
+        }
+        return out
+    }
+    private func saveStatusToDisk() {
+        let dict = Dictionary(uniqueKeysWithValues: status.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(dict) else { return }
+        try? data.write(to: Self.statusCacheURL(), options: .atomic)
+    }
+
+    /// Set the workflow status for a project. Updates the local mirror
+    /// (instant grid regrouping) and pushes the LibraryDocument so iOS
+    /// + future devices pick up the change.
+    func setStatus(_ newStatus: SongStatus, for project: ProjectReference) {
+        status[project.id] = newStatus
+        saveStatusToDisk()
+        Task { [weak self] in await self?.pushLibraryToDropbox() }
     }
 
     private static func loadHideTitleFromDisk() -> [UUID: Bool] {

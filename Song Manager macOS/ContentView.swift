@@ -81,18 +81,34 @@ struct ContentView: View {
                 .padding(.top, 80)
             } else {
                 LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(store.sortedProjects) { project in
-                        SongCard(project: project, store: store)
-                            .contextMenu {
-                                contextMenu(for: project)
+                    ForEach(store.projectSections) { section in
+                        Section {
+                            ForEach(section.projects) { project in
+                                SongCard(project: project, store: store)
+                                    .contextMenu {
+                                        contextMenu(for: project)
+                                    }
                             }
+                        } header: {
+                            sectionHeader(section)
+                        }
                     }
                 }
                 .padding(20)
-                .animation(.easeInOut(duration: 0.25), value: store.sortedProjects.map(\.id))
+                .animation(.easeInOut(duration: 0.25), value: store.projectSections.map(\.id))
             }
         }
         .background(.background)
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ section: ProjectSection) -> some View {
+        Text(section.title)
+            .font(.title2.weight(.bold))
+            .foregroundStyle(.primary)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -119,6 +135,17 @@ struct ContentView: View {
             Label("Create New Version…", systemImage: "plus.square.on.square")
         }
         .disabled(localURL == nil)
+
+        Divider()
+
+        let currentStatus = store.status[project.id] ?? .inProgress
+        ForEach(SongStatus.allCases) { s in
+            Button {
+                store.setStatus(s, for: project)
+            } label: {
+                Label(s.displayName, systemImage: currentStatus == s ? "checkmark" : s.systemImage)
+            }
+        }
 
         Divider()
 
