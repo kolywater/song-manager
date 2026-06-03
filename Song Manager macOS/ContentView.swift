@@ -1,240 +1,188 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @State private var store = ProjectStore()
-    @State private var player = AudioPlayer()
-    @State private var showingNewVersion = false
+    @State private var store = SongStore()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showAddSheet = false
+    @State private var newVersionProject: ProjectReference?
     @State private var newVersionText = ""
-    @State private var projectForNewVersion: ProjectReference?
-    @State private var draggingProject: ProjectReference?
-    @State private var showingNotes = false
-    @State private var notesText = ""
-    @State private var notesBaseText = ""
-    @State private var notesRootURL: URL?
-    @State private var notesFileURL: URL?
-    @State private var projectForNotes: ProjectReference?
 
     private let columns = [
-        GridItem(.adaptive(minimum: 310, maximum: 310), spacing: 16)
+        GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16)
     ]
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                ForEach(store.sortedProjects) { project in
-                    ProjectCardView(
-                        project: project,
-                        albumArt: store.albumArtCache[project.id],
-                        masterFilenames: project.masterFilenames,
-                        onListen: {
-                            if project.hasMastersFolder && project.masterFilenames.isEmpty {
-                                store.errorMessage = "No master files found"
-                            } else if !project.masterFilenames.isEmpty,
-                               let result = store.selectedMasterURL(for: project) {
-                                player.play(url: result.masterURL, rootURL: result.rootURL)
-                            } else if let result = store.latestBounceURL(for: project) {
-                                player.play(url: result.bounceURL, rootURL: result.rootURL)
-                            }
-                        },
-                        onSelectMaster: { filename in
-                            store.setSelectedMaster(for: project, filename: filename)
-                            if let result = store.selectedMasterURL(for: project) {
-                                player.play(url: result.masterURL, rootURL: result.rootURL)
-                            }
-                        },
-                        onNewVersion: {
-                            projectForNewVersion = project
-                            newVersionText = store.suggestedVersion(for: project)
-                            showingNewVersion = true
-                        },
-                        onNotes: {
-                            projectForNotes = project
-                            notesText = store.loadNotes(for: project)
-                            notesBaseText = notesText
-                            let info = store.notesFileInfo(for: project)
-                            notesRootURL = info?.rootURL
-                            notesFileURL = info?.notesURL
-                            showingNotes = true
-                        },
-                        onShowInFinder: { store.showInFinder(for: project) },
-                        onOpenProject: { store.openProject(for: project) },
-                        onRemove: { store.removeProject(project) },
-                        onChangeColor: { store.changeColor(for: project) },
-                        onDropAlbumArt: { providers in
-                            guard let provider = providers.first else { return }
-                            provider.loadFileRepresentation(forTypeIdentifier: "public.image") { url, _ in
-                                guard let url else { return }
-                                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                                try? FileManager.default.removeItem(at: tmp)
-                                try? FileManager.default.copyItem(at: url, to: tmp)
-                                DispatchQueue.main.async {
-                                    store.setAlbumArt(for: project, imageURL: tmp)
-                                    try? FileManager.default.removeItem(at: tmp)
-                                }
-                            }
-                        }
-                    )
-                    .opacity(draggingProject == project ? 0 : 1)
-                    .animation(nil, value: draggingProject)
-                    .onDrag {
-                        draggingProject = project
-                        return NSItemProvider(object: project.id.uuidString as NSString)
-                    }
-                    .onDrop(of: [.text], delegate: ProjectReorderDelegate(
-                        item: project,
-                        items: store.projects,
-                        dragging: $draggingProject,
-                        store: store
-                    ))
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 10)
-            .padding(.bottom, player.currentURL != nil ? 70 : 20)
-        }
-        .onDrop(of: [.text], delegate: DropOutsideDelegate(dragging: $draggingProject, store: store))
-        .overlay(alignment: .bottom) {
-            if player.currentURL != nil {
-                PlayerBarView(player: player)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
+        @Bindable var store = store
+        Group {
+            if !store.isAuthorized {
+                DropboxConnectView(store: store)
+            } else {
+                gridView
             }
         }
+        .frame(minWidth: 480, minHeight: 360)
+        .navigationTitle("Songs")
+        .toolbar { toolbarContent }
+        .onReceive(NotificationCenter.default.publisher(for: .dropboxAuthDidChange)) { _ in
+            store.rebuildSourceFromKeychain()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task.detached { [store] in await store.pullLibraryFromDropbox() }
+            Task.detached { [store] in await store.refreshStaleAlbumArt() }
+            Task.detached { [store] in await store.refreshCurrentAudio() }
+        }
         .overlay(alignment: .bottom) {
-            if let error = store.errorMessage {
-                ToastView(message: error) {
-                    store.errorMessage = nil
+            VStack(spacing: 8) {
+                if let error = store.errorMessage {
+                    ToastView(message: error) { store.errorMessage = nil }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .fixedSize()
-                .padding(.bottom, player.currentURL != nil ? 64 : 12)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                MiniPlayerView(store: store)
             }
+            .padding(.bottom, store.audio.nowPlaying != nil || store.errorMessage != nil ? 0 : 16)
         }
         .animation(.easeInOut(duration: 0.25), value: store.errorMessage != nil)
-        .onChange(of: player.errorMessage) { _, error in
-            if let error {
-                store.errorMessage = error
-                player.errorMessage = nil
-            }
+        .animation(.easeInOut(duration: 0.2), value: store.audio.nowPlaying?.id)
+        .sheet(isPresented: $showAddSheet) {
+            AddSongSheet(store: store)
         }
-        .frame(minWidth: 350)
-        .navigationTitle("Songs")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 4) {
-                    Menu {
-                        ForEach(SortMode.allCases, id: \.self) { mode in
-                            Button {
-                                store.sortMode = mode
-                            } label: {
-                                if store.sortMode == mode {
-                                    Label(mode.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(mode.rawValue)
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
-                    Button(action: { store.refresh() }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .focusEffectDisabled()
-                    Button(action: { store.addProject() }) {
-                        Image(systemName: "plus")
-                    }
-                    .focusEffectDisabled()
-                }
-            }
+        .sheet(isPresented: $store.presentingFullPlayer) {
+            FullPlayerView(store: store)
         }
-        .onChange(of: store.sortMode) {
-            UserDefaults.standard.set(store.sortMode.rawValue, forKey: "sortMode")
-        }
-        .animation(.easeInOut(duration: 0.3), value: store.sortedProjects.map(\.id))
-        .alert("New Version", isPresented: $showingNewVersion) {
-            TextField("Version", text: $newVersionText)
+        .alert("Create New Version", isPresented: Binding(
+            get: { newVersionProject != nil },
+            set: { if !$0 { newVersionProject = nil; newVersionText = "" } }
+        )) {
+            TextField("Version (e.g. 1.3)", text: $newVersionText)
             Button("Cancel", role: .cancel) {}
-            Button("OK") {
-                if let project = projectForNewVersion {
-                    store.duplicateLatestALS(for: project, version: newVersionText)
+            Button("Create") {
+                if let p = newVersionProject {
+                    store.duplicateLatestALS(for: p, version: newVersionText)
                 }
             }
         } message: {
-            if let project = projectForNewVersion, let current = project.latestVersionString {
+            if let current = newVersionProject?.latestVersionString {
                 Text("Current version: \(current)")
+            } else {
+                Text("Pick the version number for the new .als file.")
             }
         }
-        .overlay {
-            if showingNotes, let project = projectForNotes {
-                NoteEditorView(
-                    songName: project.displayName,
-                    text: $notesText,
-                    onSave: { store.saveNotes(for: project, text: notesText) },
-                    onDismiss: {
-                        store.saveNotes(for: project, text: notesText)
-                        showingNotes = false
-                    },
-                    baseText: notesBaseText,
-                    rootURL: notesRootURL,
-                    notesURL: notesFileURL,
-                    reloadNotes: { store.loadNotes(for: project) }
-                )
-                .background(Color(.windowBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
-                .padding(32)
-                .transition(.opacity)
+    }
+
+    private var gridView: some View {
+        ScrollView {
+            if store.projects.isEmpty {
+                ContentUnavailableView {
+                    Label("No songs yet", systemImage: "music.note.list")
+                } description: {
+                    Text("Click + to add a song from Dropbox.")
+                }
+                .padding(.top, 80)
+            } else {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(store.sortedProjects) { project in
+                        SongCard(project: project, store: store)
+                            .contextMenu {
+                                contextMenu(for: project)
+                            }
+                    }
+                }
+                .padding(20)
+                .animation(.easeInOut(duration: 0.25), value: store.sortedProjects.map(\.id))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showingNotes)
+        .background(.background)
     }
-}
 
-struct ProjectReorderDelegate: DropDelegate {
-    let item: ProjectReference
-    let items: [ProjectReference]
-    @Binding var dragging: ProjectReference?
-    let store: ProjectStore
+    @ViewBuilder
+    private func contextMenu(for project: ProjectReference) -> some View {
+        let localURL = SongStore.localFolderURL(for: project)
+        Button {
+            store.showInFinder(project)
+        } label: {
+            Label("Reveal in Finder", systemImage: "folder")
+        }
+        .disabled(localURL == nil)
 
-    func dropEntered(info: DropInfo) {
-        guard store.sortMode == .custom,
-              let current = dragging, item != current,
-              let from = items.firstIndex(of: current),
-              let to = items.firstIndex(of: item) else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
-            store.moveProject(from: IndexSet(integer: from), to: to > from ? to + 1 : to)
+        Button {
+            store.openLatestALS(for: project)
+        } label: {
+            Label("Open Latest .als", systemImage: "music.note")
+        }
+        .disabled(localURL == nil)
+
+        Button {
+            newVersionProject = project
+            newVersionText = ""
+        } label: {
+            Label("Create New Version…", systemImage: "plus.square.on.square")
+        }
+        .disabled(localURL == nil)
+
+        Divider()
+
+        Button {
+            store.toggleHideTitle(project)
+        } label: {
+            let hidden = store.hideTitle[project.id] == true
+            Label(hidden ? "Show Title" : "Hide Title",
+                  systemImage: hidden ? "textformat" : "textformat.alt")
+        }
+
+        Button {
+            Task { await store.refreshAlbumArt(for: project) }
+        } label: {
+            Label("Refresh Artwork", systemImage: "arrow.clockwise")
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            store.removeProject(project)
+        } label: {
+            Label("Remove from Library", systemImage: "trash")
         }
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: store.sortMode == .custom ? .move : .cancel)
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 4) {
+                Menu {
+                    ForEach(LibrarySortMode.allCases) { mode in
+                        Button {
+                            store.sortMode = mode
+                        } label: {
+                            if store.sortMode == mode {
+                                Label(mode.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(mode.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+
+                Button {
+                    Task {
+                        await store.pullLibraryFromDropbox()
+                        await store.refreshActivityDates()
+                        await store.refreshStaleAlbumArt()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .disabled(!store.isAuthorized)
+            }
+        }
     }
-
-    func performDrop(info: DropInfo) -> Bool {
-        dragging = nil
-        store.save()
-        return true
-    }
-}
-
-struct DropOutsideDelegate: DropDelegate {
-    @Binding var dragging: ProjectReference?
-    let store: ProjectStore
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        dragging = nil
-        store.save()
-        return true
-    }
-}
-
-#Preview {
-    ContentView()
 }

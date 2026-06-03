@@ -5,6 +5,8 @@ import AVFoundation
 @Observable
 @MainActor
 final class SpeechRecognitionService {
+    static let shared = SpeechRecognitionService()
+
     private(set) var isRecording: Bool = false
     private(set) var transcript: String = ""
 
@@ -26,7 +28,13 @@ final class SpeechRecognitionService {
             }
         }
         guard speechAuth == .authorized else { return false }
+        // Microphone permission. iOS exposes AVAudioApplication; macOS
+        // uses AVCaptureDevice.requestAccess.
+        #if os(iOS)
         return await AVAudioApplication.requestRecordPermission()
+        #else
+        return await AVCaptureDevice.requestAccess(for: .audio)
+        #endif
     }
 
     func start() throws {
@@ -39,9 +47,13 @@ final class SpeechRecognitionService {
         task?.cancel()
         task = nil
 
+        // AVAudioSession is iOS-only. macOS routes audio through the
+        // shared system mixer with no app-level session category.
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: .duckOthers)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
+        #endif
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -104,8 +116,10 @@ final class SpeechRecognitionService {
         task = nil
         isRecording = false
 
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .default)
         try? session.setActive(true)
+        #endif
     }
 }

@@ -19,6 +19,13 @@ struct ContentView: View {
                         SongCard(project: project, store: store)
                             .contextMenu {
                                 Button {
+                                    Task { await store.toggleHideTitle(project) }
+                                } label: {
+                                    let hidden = store.hideTitle[project.id] == true
+                                    Label(hidden ? "Show title" : "Hide title",
+                                          systemImage: hidden ? "textformat" : "textformat.alt")
+                                }
+                                Button {
                                     Task { await store.refreshAlbumArt(for: project) }
                                 } label: {
                                     Label("Refresh artwork", systemImage: "arrow.clockwise")
@@ -110,6 +117,9 @@ struct ContentView: View {
             // hold up scene activation. The await points inside suspend
             // on network I/O, so main isn't blocked either way.
             guard phase == .active else { return }
+            Task.detached { [store] in
+                await store.pullLibraryFromDropbox()
+            }
             Task.detached { [store] in
                 await store.refreshActivityDates()
             }

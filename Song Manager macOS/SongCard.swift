@@ -1,0 +1,156 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// A square card showing a song's album art (or a placeholder with the
+/// song's initial if there's no art). Star top-right, big title top-left
+/// with a drop shadow, glass play button bottom-right. Dropping an
+/// image onto the card replaces the album art on Dropbox.
+struct SongCard: View {
+    let project: ProjectReference
+    var store: SongStore
+    @State private var isDropTargeted = false
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { artLayer }
+            .overlay(alignment: .topLeading) { titleOverlay }
+            .overlay(alignment: .topTrailing) { starOverlay }
+            .overlay(alignment: .bottomTrailing) { playButtonOverlay }
+            .overlay {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.accentColor, lineWidth: 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.18))
+                        )
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .onTapGesture {
+                Task { await store.play(project) }
+            }
+            .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
+                handleDrop(providers)
+            }
+            .task(id: project.id) {
+                await store.loadAlbumArt(for: project)
+            }
+    }
+
+    // MARK: - Overlays
+
+    @ViewBuilder
+    private var artLayer: some View {
+        if let nsImage = store.albumArt[project.id] {
+            Image(nsImage: nsImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            placeholderArt
+        }
+    }
+
+    private var placeholderArt: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(hue: hue, saturation: 0.55, brightness: 0.55),
+                    Color(hue: hue, saturation: 0.45, brightness: 0.25),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Text(initial)
+                .font(.system(size: 64, weight: .black, design: .rounded))
+                .foregroundStyle(.white.opacity(0.18))
+        }
+    }
+
+    @ViewBuilder
+    private var titleOverlay: some View {
+        if store.hideTitle[project.id] != true {
+            Text(project.displayTitle)
+                .font(.system(size: 22, weight: .heavy))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 1)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.top, 18)
+                .padding(.horizontal, 20)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var starOverlay: some View {
+        if store.starred[project.id] == true {
+            Image(systemName: "star.fill")
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(Color.yellow)
+                .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 1)
+                .padding(.top, 18)
+                .padding(.trailing, 16)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Bottom-right play affordance. Stops the card-level tap (which
+    /// opens the full player) and starts playback immediately instead.
+    private var playButtonOverlay: some View {
+        Image(systemName: "play.fill")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 56, height: 56)
+            .glassEffect(.clear, in: Circle())
+            .contentShape(Circle())
+            .highPriorityGesture(
+                TapGesture().onEnded {
+                    Task { await store.play(project, autoStart: true, showPlayer: false) }
+                }
+            )
+            .padding(12)
+    }
+
+    // MARK: - Placeholder color
+
+    /// Stable hue across launches. Prefers `project.gradientHue` if the
+    /// user has set one; otherwise derives from the UUID's first byte
+    /// (NOT `hashValue` — that's randomized per process and would make
+    /// the placeholder flicker color on each launch).
+    private var hue: Double {
+        if let h = project.gradientHue { return h }
+        return Double(project.id.uuid.0) / 256.0
+    }
+
+    private var initial: String {
+        String(project.displayName.first.map { String($0) } ?? "·").uppercased()
+    }
+
+    // MARK: - Drop
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        let typeIdentifier = provider.registeredTypeIdentifiers.first {
+            UTType($0)?.conforms(to: .image) == true
+        } ?? "public.image"
+        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+            guard let url else { return }
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+            try? FileManager.default.removeItem(at: tmp)
+            do {
+                try FileManager.default.copyItem(at: url, to: tmp)
+            } catch {
+                return
+            }
+            DispatchQueue.main.async {
+                store.setAlbumArt(for: project, imageURL: tmp)
+                try? FileManager.default.removeItem(at: tmp)
+            }
+        }
+        return true
+    }
+}

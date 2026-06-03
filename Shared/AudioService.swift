@@ -2,7 +2,14 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 import Observation
+
+#if canImport(UIKit)
 import UIKit
+typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
+import AppKit
+typealias PlatformImage = NSImage
+#endif
 
 @MainActor
 @Observable
@@ -53,7 +60,7 @@ final class AudioService {
 
     /// Load a project's audio into the player. Starts paused at 0 by
     /// default; pass `autoStart: true` to begin playing right away.
-    func load(url: URL, project: ProjectReference, filename: String? = nil, artwork: UIImage? = nil, autoStart: Bool = false) {
+    func load(url: URL, project: ProjectReference, filename: String? = nil, artwork: PlatformImage? = nil, autoStart: Bool = false) {
         detachTimeObserver()
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -154,6 +161,10 @@ final class AudioService {
     // MARK: - Private
 
     private func configureSession() {
+        // AVAudioSession is iOS-only — macOS routes audio through the
+        // shared system mixer with no app-level session category, so we
+        // skip session setup entirely there.
+        #if os(iOS)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
@@ -161,6 +172,7 @@ final class AudioService {
         } catch {
             // Session config failure isn't fatal — log silently.
         }
+        #endif
     }
 
     private func attachTimeObserver() {
@@ -224,7 +236,7 @@ final class AudioService {
         }
     }
 
-    private func updateNowPlayingInfo(artwork: UIImage?, preserve: Bool = false) {
+    private func updateNowPlayingInfo(artwork: PlatformImage?, preserve: Bool = false) {
         guard let project = nowPlaying else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return

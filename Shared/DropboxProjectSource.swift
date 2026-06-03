@@ -39,6 +39,16 @@ final class DropboxProjectSource: ProjectSource {
         return .api(description)
     }
 
+    /// Heuristic for the "path not found" branch of the download/get_metadata
+    /// route errors. Used to distinguish "file doesn't exist yet" from
+    /// real failures so callers can do first-run migration cleanly.
+    private static func isNotFound(_ error: DropboxSourceError) -> Bool {
+        guard case .api(let description) = error else { return false }
+        let lower = description.lowercased()
+        return lower.contains("path/not_found")
+            || lower.contains("not_found")
+    }
+
     init(storageURL: URL) throws {
         guard let oauth = DropboxOAuthManager.sharedOAuthManager,
               let token = oauth.getFirstAccessToken() else {
@@ -253,6 +263,58 @@ final class DropboxProjectSource: ProjectSource {
 
     private static func notesPath(for project: ProjectReference) -> String {
         "\(notesRootPath)/\(project.displayName).json"
+    }
+
+    // MARK: - Album art upload (Mac drag-and-drop, optional anywhere)
+
+    /// Uploads (or replaces) a song's album art at the canonical path
+    /// `<folderPath>/_ALBUM ART/<songName> album art.<ext>`. Callers
+    /// should `refreshAlbumArt(for:)` after this returns so the local
+    /// cache picks up the new image.
+    func uploadAlbumArt(
+        forFolderPath folderPath: String,
+        songName: String,
+        imageData: Data,
+        fileExtension: String
+    ) async throws {
+        let ext = fileExtension.lowercased()
+        let path = "\(folderPath)/_ALBUM ART/\(songName) album art.\(ext)"
+        try await uploadFile(path: path, data: imageData)
+    }
+
+    // MARK: - Library (cross-device registry)
+
+    /// Path used for the Dropbox-backed library file. Lives under
+    /// `song notes/` because that's the only subfolder this app writes to
+    /// (see `writableSubfolder` and the `saveNotes` guard above). The leading
+    /// underscore keeps it out of folder pickers that would treat it as a song.
+    private static let libraryPath = "\(notesRootPath)/_library.json"
+
+    /// Pulls the library file from Dropbox. Returns `nil` when the file
+    /// doesn't exist yet (first run on a fresh account). Throws on auth
+    /// or unexpected API errors so the caller can fall back to the local
+    /// cache. The local cache, not this method, is the offline path.
+    func loadLibrary() async throws -> LibraryDocument? {
+        do {
+            let data = try await downloadFile(path: Self.libraryPath)
+            return try JSONDecoder().decode(LibraryDocument.self, from: data)
+        } catch let err as DropboxSourceError {
+            if Self.isNotFound(err) { return nil }
+            throw err
+        }
+    }
+
+    /// Uploads the library file to Dropbox, overwriting. The caller is
+    /// responsible for stamping `modifiedAt = Date()` immediately before
+    /// calling — we don't mutate the caller's value here so a retry
+    /// uploads the same bytes.
+    func saveLibrary(_ doc: LibraryDocument) async throws {
+        // App-level write scoping — refuse to write outside song notes/.
+        guard Self.libraryPath.lowercased().hasPrefix(Self.notesRootPath.lowercased() + "/") else {
+            throw DropboxSourceError.api("Refused write outside song notes/: \(Self.libraryPath)")
+        }
+        let data = try JSONEncoder().encode(doc)
+        try await uploadFile(path: Self.libraryPath, data: data)
     }
 
     private func uploadFile(path: String, data: Data) async throws {

@@ -32,6 +32,9 @@ final class SongStore {
     var presentingFullPlayer: Bool = false
     var notes: [UUID: [Note]] = [:]
     var starred: [UUID: Bool] = [:]
+    /// Per-song grid preference. Mirrors Mac's hideTitle so the user can
+    /// hide a song's title from either device and it sticks everywhere.
+    var hideTitle: [UUID: Bool] = [:]
     var selectedAudioPath: [UUID: String] = [:]
     /// Newest-bounce modDate captured when each project's audio was
     /// pinned. A sticky pin auto-releases once a bounce newer than this
@@ -71,9 +74,13 @@ final class SongStore {
         loadFromDisk(at: url)
         activityDates = Self.loadActivityDatesFromDisk()
         starred = Self.loadStarredFromDisk()
+        hideTitle = Self.loadHideTitleFromDisk()
         selectedAudioPath = Self.loadSelectedAudioFromDisk()
         pinWatermark = Self.loadPinWatermarkFromDisk()
         if source != nil {
+            Task { [weak self] in
+                await self?.pullLibraryFromDropbox()
+            }
             Task { [weak self] in
                 await self?.refreshActivityDates()
             }
@@ -111,6 +118,7 @@ final class SongStore {
             handleDropboxError(error)
             return false
         }
+        Task { [weak self] in await self?.pullLibraryFromDropbox() }
         Task { [weak self] in await self?.refreshActivityDates() }
         Task { [weak self] in await self?.prefetchProjectStates() }
         return true
@@ -154,6 +162,33 @@ final class SongStore {
     private static func pinWatermarkCacheURL() -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         return docs.appending(path: "iosPinWatermark.json")
+    }
+
+    private static func hideTitleCacheURL() -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appending(path: "iosHideTitle.json")
+    }
+
+    private static func loadHideTitleFromDisk() -> [UUID: Bool] {
+        guard let data = try? Data(contentsOf: hideTitleCacheURL()),
+              let dict = try? JSONDecoder().decode([String: Bool].self, from: data) else { return [:] }
+        var out: [UUID: Bool] = [:]
+        for (key, value) in dict {
+            if let id = UUID(uuidString: key) { out[id] = value }
+        }
+        return out
+    }
+
+    private func saveHideTitleToDisk() {
+        let dict = Dictionary(uniqueKeysWithValues: hideTitle.map { ($0.key.uuidString, $0.value) })
+        guard let data = try? JSONEncoder().encode(dict) else { return }
+        try? data.write(to: Self.hideTitleCacheURL(), options: .atomic)
+    }
+
+    func toggleHideTitle(_ project: ProjectReference) async {
+        hideTitle[project.id] = !(hideTitle[project.id] ?? false)
+        saveHideTitleToDisk()
+        await pushLibraryToDropbox()
     }
 
     /// Local mirror of NotesDocument.pinWatermark so the sticky-pin
@@ -285,6 +320,7 @@ final class SongStore {
         Task { [weak self] in
             await self?.refreshActivityDate(for: project)
         }
+        Task { [weak self] in await self?.pushLibraryToDropbox() }
     }
 
     func refreshActivityDates() async {
@@ -345,9 +381,100 @@ final class SongStore {
         // artLuminance.removeValue(forKey: project.id)
         artTintColor.removeValue(forKey: project.id)
         activityDates.removeValue(forKey: project.id)
+        hideTitle.removeValue(forKey: project.id)
         saveActivityDates()
+        saveHideTitleToDisk()
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)
+        Task { [weak self] in await self?.pushLibraryToDropbox() }
+    }
+
+    // MARK: - Library sync (Dropbox-backed registry)
+
+    /// Push the current `projects` up to Dropbox as a `LibraryDocument`.
+    /// Best-effort: failures surface as a toast but don't undo local
+    /// state — `saveRegistry()` has already persisted the local cache.
+    func pushLibraryToDropbox() async {
+        guard let source else { return }
+        let items = projects.map { project in
+            LibraryEntry(
+                displayName: project.displayName,
+                addedAt: Date(),
+                hideTitle: hideTitle[project.id] ?? false
+            )
+        }
+        let doc = LibraryDocument(modifiedAt: Date(), items: items)
+        do {
+            try await source.saveLibrary(doc)
+        } catch {
+            handleDropboxError(error)
+        }
+    }
+
+    /// Pull the Dropbox library and reconcile with `projects`. On first
+    /// run (no `_library.json` yet) we seed it from the local registry so
+    /// the cross-device handshake starts off populated.
+    func pullLibraryFromDropbox() async {
+        guard let source else { return }
+        do {
+            if let remote = try await source.loadLibrary() {
+                reconcileLibrary(remote, source: source)
+                source.saveRegistry(projects)
+            } else if !projects.isEmpty {
+                await pushLibraryToDropbox()
+            }
+        } catch {
+            // Pull failure → keep using local cache. Only surface auth
+            // errors so the Connect sheet re-presents.
+            if let dbx = error as? DropboxProjectSource.DropboxSourceError,
+               case .authExpired = dbx {
+                handleDropboxError(error)
+            }
+        }
+    }
+
+    /// Apply the remote library to `projects`, keyed on lowercased
+    /// `displayName` (the cross-device identity). Existing projects keep
+    /// their UUIDs (album-art and waveform caches stay valid). New remote
+    /// entries get fresh UUIDs and a synthesized `.dropboxPath`. Local
+    /// entries missing from the remote are dropped along with their
+    /// caches — last-writer-wins.
+    private func reconcileLibrary(_ remote: LibraryDocument, source: DropboxProjectSource) {
+        let byName = Dictionary(
+            uniqueKeysWithValues: projects.map { ($0.displayName.lowercased(), $0) }
+        )
+        var rebuilt: [ProjectReference] = []
+        var hideTitleDirty = false
+        for entry in remote.items {
+            let key = entry.displayName.lowercased()
+            let project: ProjectReference
+            if let existing = byName[key] {
+                project = existing
+            } else {
+                let path = "\(source.rootPath)/\(entry.displayName)"
+                project = ProjectReference(
+                    displayName: entry.displayName,
+                    location: .dropboxPath(path)
+                )
+            }
+            rebuilt.append(project)
+            if (hideTitle[project.id] ?? false) != entry.hideTitle {
+                hideTitle[project.id] = entry.hideTitle
+                hideTitleDirty = true
+            }
+        }
+        let keptIDs = Set(rebuilt.map(\.id))
+        for project in projects where !keptIDs.contains(project.id) {
+            albumArt.removeValue(forKey: project.id)
+            artTintColor.removeValue(forKey: project.id)
+            activityDates.removeValue(forKey: project.id)
+            hideTitle.removeValue(forKey: project.id)
+            try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
+            waveform.invalidate(for: project.id)
+            hideTitleDirty = true
+        }
+        if hideTitleDirty { saveHideTitleToDisk() }
+        projects = rebuilt
     }
 
     func refreshAlbumArt(for project: ProjectReference) async {

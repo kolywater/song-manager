@@ -94,17 +94,20 @@ struct SongCard: View {
         }
     }
 
+    @ViewBuilder
     private var titleOverlay: some View {
-        Text(project.displayTitle)
-            .font(.system(size: 22, weight: .heavy))
-            .foregroundStyle(.white)
-            .lineLimit(3)
-            .multilineTextAlignment(.leading)
-            .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 1)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.top, 18)
-            .padding(.horizontal, 20)
-            .allowsHitTesting(false)
+        if store.hideTitle[project.id] != true {
+            Text(project.displayTitle)
+                .font(.system(size: 22, weight: .heavy))
+                .foregroundStyle(.white)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 1)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.top, 18)
+                .padding(.horizontal, 20)
+                .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder
