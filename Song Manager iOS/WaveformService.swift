@@ -46,6 +46,18 @@ final class WaveformService {
         loadedKeys[project.id] = audioKey
     }
 
+    /// Drop just the cached waveform for a specific (project, audio file)
+    /// pair. Used when the underlying audio bytes change but the filename
+    /// stays the same (same-name bounce replacement) — the disk-cached
+    /// silhouette would otherwise stay stale.
+    func invalidate(for id: UUID, audioKey: String) {
+        if loadedKeys[id] == audioKey {
+            waveforms.removeValue(forKey: id)
+            loadedKeys.removeValue(forKey: id)
+        }
+        try? FileManager.default.removeItem(at: Self.cacheURL(for: id, key: audioKey))
+    }
+
     func invalidate(for id: UUID) {
         waveforms.removeValue(forKey: id)
         loadedKeys.removeValue(forKey: id)

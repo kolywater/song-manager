@@ -180,13 +180,15 @@ final class DropboxProjectSource: ProjectSource {
 
     /// Resolve a specific relative path (`bounces/...` or `_MASTERS/...`)
     /// to a Dropbox temporary URL. Returns nil if the file no longer
-    /// exists.
-    func fetchAudioURL(forFolderPath folderPath: String, relativePath: String) async throws -> (url: URL, filename: String)? {
+    /// exists. `modDate` is the file's clientModified, used to detect
+    /// same-name remote replacements that would otherwise be served
+    /// indefinitely from a stale cache.
+    func fetchAudioURL(forFolderPath folderPath: String, relativePath: String) async throws -> (url: URL, filename: String, modDate: Date)? {
         let path = folderPath + "/" + relativePath
         do {
-            let url = try await getTemporaryLink(path: path)
+            let link = try await getTemporaryLink(path: path)
             let filename = (relativePath as NSString).lastPathComponent
-            return (url, filename)
+            return (link.url, filename, link.modified)
         } catch {
             return nil
         }
@@ -203,13 +205,13 @@ final class DropboxProjectSource: ProjectSource {
 
     /// Convenience: pick the latest bounce when no explicit selection
     /// has been made. Mirrors the Mac default.
-    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String, relativePath: String)? {
+    func fetchLatestBounceURL(forFolderPath folderPath: String) async throws -> (url: URL, filename: String, relativePath: String, modDate: Date)? {
         guard let latest = await latestBounce(forFolderPath: folderPath) else { return nil }
-        let url = try await getTemporaryLink(path: folderPath + "/" + latest.relativePath)
-        return (url, latest.filename, latest.relativePath)
+        let link = try await getTemporaryLink(path: folderPath + "/" + latest.relativePath)
+        return (link.url, latest.filename, latest.relativePath, latest.modDate)
     }
 
-    private func getTemporaryLink(path: String) async throws -> URL {
+    private func getTemporaryLink(path: String) async throws -> (url: URL, modified: Date) {
         try await withCheckedThrowingContinuation { continuation in
             client.files.getTemporaryLink(path: path).response { response, error in
                 if let error = error {
@@ -220,7 +222,7 @@ final class DropboxProjectSource: ProjectSource {
                     continuation.resume(throwing: DropboxSourceError.api("No temporary link"))
                     return
                 }
-                continuation.resume(returning: url)
+                continuation.resume(returning: (url, response.metadata.clientModified))
             }
         }
     }

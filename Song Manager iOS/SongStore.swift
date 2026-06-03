@@ -646,7 +646,10 @@ final class SongStore {
     /// `resolveAudio` handles both the default "latest bounce" case and a
     /// sticky pin that has gone stale — so a version uploaded while the
     /// app was backgrounded (e.g. 8.9.2 → 8.9.3) gets picked up either
-    /// way. Quiet on failure: a foreground refresh shouldn't surface
+    /// way. We also reload when the *filename* is unchanged but the
+    /// remote bytes have been replaced (rebounced over the same name);
+    /// detected via the cached-vs-remote modDate comparison.
+    /// Quiet on failure: a foreground refresh shouldn't surface
     /// transient network errors.
     func refreshCurrentAudio() async {
         guard let project = audio.nowPlaying,
@@ -654,10 +657,17 @@ final class SongStore {
               let source else { return }
         do {
             guard let resolved = try await resolveAudio(source: source, project: project, folderPath: folderPath) else { return }
-            // Only reload when the resolved file differs from what's
-            // loaded — otherwise we'd needlessly reset playback position.
-            guard resolved.filename != audio.currentTrackFilename,
+            let filenameChanged = resolved.filename != audio.currentTrackFilename
+            let cachedMod = AudioCache.shared.remoteModified(projectID: project.id, filename: resolved.filename)
+            // nil cachedMod = legacy cache from before xattr stamping, or
+            // no cache yet — treat as stale so the user gets the current
+            // bytes one time, after which subsequent foregrounds compare
+            // precisely.
+            let contentChanged = cachedMod.map { resolved.modDate > $0.addingTimeInterval(1) } ?? true
+            guard (filenameChanged || contentChanged),
                   audio.nowPlaying?.id == project.id else { return }
+            // cachedOrStream takes care of dropping the stale audio +
+            // waveform caches before returning a URL.
             let playbackURL = cachedOrStream(bounce: resolved, project: project)
             audio.load(url: playbackURL, project: project, filename: resolved.filename, artwork: albumArt[project.id], autoStart: audio.isPlaying)
             Task { [weak self] in
@@ -683,7 +693,7 @@ final class SongStore {
         source: DropboxProjectSource,
         project: ProjectReference,
         folderPath: String
-    ) async throws -> (url: URL, filename: String, relativePath: String)? {
+    ) async throws -> (url: URL, filename: String, relativePath: String, modDate: Date)? {
         if let selected = selectedAudioPath[project.id] {
             // `latestBounce` returns nil when offline; in that case we
             // skip the staleness check entirely and just honor the pin.
@@ -705,7 +715,7 @@ final class SongStore {
                 }
             }
             if let result = try await source.fetchAudioURL(forFolderPath: folderPath, relativePath: selected) {
-                return (result.url, result.filename, selected)
+                return (result.url, result.filename, selected, result.modDate)
             }
             // fetchAudioURL swallows errors and returns nil for both "file
             // is gone" and "network is down". Don't clobber the selection
@@ -731,16 +741,28 @@ final class SongStore {
     }
 
     /// Cache hit returns the local URL; cache miss kicks off a background
-    /// download and returns the streaming URL.
+    /// download and returns the streaming URL. Detects same-name remote
+    /// replacements (rebouncing over an existing version) by comparing
+    /// the cached file's recorded clientModified against the resolved
+    /// remote modDate. A stale cache (or a legacy cache from before this
+    /// stamp existed) is dropped along with its waveform so the stream
+    /// URL wins and the background download repopulates with fresh bytes.
     private func cachedOrStream(
-        bounce: (url: URL, filename: String, relativePath: String),
+        bounce: (url: URL, filename: String, relativePath: String, modDate: Date),
         project: ProjectReference
     ) -> URL {
+        let cachedMod = AudioCache.shared.remoteModified(projectID: project.id, filename: bounce.filename)
+        // 1s slop matches the album-art and pin-watermark comparisons.
+        let isStale = cachedMod.map { bounce.modDate > $0.addingTimeInterval(1) } ?? true
+        if isStale {
+            AudioCache.shared.invalidate(projectID: project.id, filename: bounce.filename)
+            waveform.invalidate(for: project.id, audioKey: bounce.filename)
+        }
         if let local = AudioCache.shared.localURL(projectID: project.id, filename: bounce.filename) {
             return local
         }
-        Task.detached { [filename = bounce.filename, remote = bounce.url, id = project.id] in
-            _ = try? await AudioCache.shared.download(from: remote, projectID: id, filename: filename)
+        Task.detached { [filename = bounce.filename, remote = bounce.url, id = project.id, mod = bounce.modDate] in
+            _ = try? await AudioCache.shared.download(from: remote, projectID: id, filename: filename, remoteModified: mod)
         }
         return bounce.url
     }

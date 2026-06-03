@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Per-bounce on-disk cache for streamed Dropbox audio. Files are keyed
@@ -6,7 +7,7 @@ import Foundation
 /// so iOS won't evict under storage pressure — critical because the
 /// only path back to a bounce when offline is what's already on disk.
 /// We LRU-prune to a hard byte cap on every successful download.
-final class AudioCache {
+nonisolated final class AudioCache {
     static let shared = AudioCache()
     private init() {}
 
@@ -83,13 +84,16 @@ final class AudioCache {
 
     /// Downloads a remote URL into the cache. Idempotent — if the file is
     /// already on disk we return it without re-fetching. Triggers a prune
-    /// pass after each successful download.
+    /// pass after each successful download. `remoteModified` is stamped
+    /// onto the cached file as an xattr so callers can later detect a
+    /// same-name remote replacement and invalidate the cache.
     @discardableResult
-    func download(from remote: URL, projectID: UUID, filename: String) async throws -> URL {
+    func download(from remote: URL, projectID: UUID, filename: String, remoteModified: Date? = nil) async throws -> URL {
         let dest = Self.localPath(projectID: projectID, filename: filename)
         if FileManager.default.fileExists(atPath: dest.path(percentEncoded: false)) {
             try? FileManager.default.setAttributes([.modificationDate: Date()],
                                                    ofItemAtPath: dest.path(percentEncoded: false))
+            if let remoteModified { Self.setRemoteModified(remoteModified, at: dest) }
             return dest
         }
         let (tmp, _) = try await URLSession.shared.download(from: remote)
@@ -97,12 +101,58 @@ final class AudioCache {
             try? FileManager.default.removeItem(at: dest)
         }
         try FileManager.default.moveItem(at: tmp, to: dest)
-        Task.detached { Self.shared.prune() }
+        if let remoteModified { Self.setRemoteModified(remoteModified, at: dest) }
+        Task.detached { Self.prune() }
         return dest
     }
 
+    /// Drop a single cached file. Used when we detect the remote version
+    /// no longer matches what's on disk (same-name replacement).
+    func invalidate(projectID: UUID, filename: String) {
+        let url = Self.localPath(projectID: projectID, filename: filename)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    // MARK: - Remote modified xattr
+    //
+    // We can't reuse the file's mtime as "what remote version this is" —
+    // `localURL` and `download` already touch mtime to keep the cache
+    // fresh for the LRU prune. Store the Dropbox clientModified as an
+    // extended attribute on the cached file instead. xattr survives
+    // moves within the filesystem and disappears with the file, so we
+    // don't need a sidecar.
+
+    private static let remoteModifiedXAttr = "com.adenel.songmanager.remoteModified"
+
+    /// Returns nil for files with no stamp (legacy caches downloaded
+    /// before this xattr existed) — callers should treat that as "version
+    /// unknown" and refresh.
+    func remoteModified(projectID: UUID, filename: String) -> Date? {
+        let url = Self.localPath(projectID: projectID, filename: filename)
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        return Self.remoteModified(at: url)
+    }
+
+    private static func setRemoteModified(_ date: Date, at url: URL) {
+        var value = date.timeIntervalSince1970
+        let path = url.path(percentEncoded: false)
+        _ = withUnsafePointer(to: &value) { ptr in
+            setxattr(path, remoteModifiedXAttr, ptr, MemoryLayout<Double>.size, 0, 0)
+        }
+    }
+
+    private static func remoteModified(at url: URL) -> Date? {
+        let path = url.path(percentEncoded: false)
+        var value: Double = 0
+        let read = withUnsafeMutablePointer(to: &value) { ptr in
+            getxattr(path, remoteModifiedXAttr, ptr, MemoryLayout<Double>.size, 0, 0)
+        }
+        guard read == MemoryLayout<Double>.size else { return nil }
+        return Date(timeIntervalSince1970: value)
+    }
+
     /// Walk the cache, sum bytes, and delete oldest-first until under the cap.
-    private func prune() {
+    private nonisolated static func prune() {
         let fm = FileManager.default
         let dir = Self.cacheDir()
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
