@@ -106,11 +106,16 @@ final class DropboxProjectSource: ProjectSource {
         }
 
         // Prefer the official "<song name> album art.<ext>" if it exists.
+        // Among multiple matches (e.g. someone bounced both a .jpg and
+        // a .png), pick the most recently modified — folder-listing
+        // order isn't sorted by modDate, so without this an older .jpg
+        // can beat a freshly-uploaded .png purely by appearing first.
         let officialStem = "\(songName) album art".lowercased()
-        let official = images.first { file in
+        let officialMatches = images.filter { file in
             let stem = (file.name as NSString).deletingPathExtension.lowercased()
             return stem == officialStem
         }
+        let official = officialMatches.sorted { $0.clientModified > $1.clientModified }.first
         return official ?? images.sorted { $0.clientModified > $1.clientModified }.first
     }
 

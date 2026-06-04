@@ -7,8 +7,16 @@ struct ContentView: View {
     @State private var newVersionProject: ProjectReference?
     @State private var newVersionText = ""
 
+    /// Three flexible columns — column count is fixed, each cell sizes
+    /// to fill its third of the available width (minus padding and
+    /// inter-column spacing). `SongCard`'s 1:1 aspectRatio makes the
+    /// rows match the column width, so tiles grow and shrink together
+    /// as the window resizes; the leading/trailing 20pt padding stays
+    /// fixed.
     private let columns = [
-        GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16)
+        GridItem(.flexible(minimum: 220), spacing: 16),
+        GridItem(.flexible(minimum: 220), spacing: 16),
+        GridItem(.flexible(minimum: 220), spacing: 16),
     ]
 
     var body: some View {
@@ -20,7 +28,10 @@ struct ContentView: View {
                 gridView
             }
         }
-        .frame(minWidth: 480, minHeight: 360)
+        // 3 cols * 220 min cell + 2 * 16 inter-col spacing + 2 * 20 grid
+        // padding = 732. Below this the tiles would have to shrink past
+        // their 220pt floor, so we just stop the window resizing here.
+        .frame(minWidth: 732, minHeight: 360)
         .navigationTitle("Songs")
         .toolbar { toolbarContent }
         .onReceive(NotificationCenter.default.publisher(for: .dropboxAuthDidChange)) { _ in
@@ -84,10 +95,17 @@ struct ContentView: View {
                     ForEach(store.projectSections) { section in
                         Section {
                             ForEach(section.projects) { project in
-                                SongCard(project: project, store: store)
-                                    .contextMenu {
-                                        contextMenu(for: project)
+                                SongCard(
+                                    project: project,
+                                    store: store,
+                                    onCreateNewVersion: {
+                                        newVersionProject = project
+                                        newVersionText = ""
                                     }
+                                )
+                                .contextMenu {
+                                    contextMenu(for: project)
+                                }
                             }
                         } header: {
                             sectionHeader(section)
@@ -175,41 +193,51 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 4) {
-                Menu {
-                    ForEach(LibrarySortMode.allCases) { mode in
-                        Button {
-                            store.sortMode = mode
-                        } label: {
-                            if store.sortMode == mode {
-                                Label(mode.rawValue, systemImage: "checkmark")
-                            } else {
-                                Text(mode.rawValue)
-                            }
+            Menu {
+                ForEach(LibrarySortMode.allCases) { mode in
+                    Button {
+                        store.sortMode = mode
+                    } label: {
+                        if store.sortMode == mode {
+                            Label(mode.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(mode.rawValue)
                         }
                     }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
                 }
-
-                Button {
-                    Task {
-                        await store.pullLibraryFromDropbox()
-                        await store.refreshActivityDates()
-                        await store.refreshStaleAlbumArt()
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .keyboardShortcut("r", modifiers: .command)
-
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .disabled(!store.isAuthorized)
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
             }
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task {
+                    await store.pullLibraryFromDropbox()
+                    await store.refreshActivityDates()
+                    await store.refreshStaleAlbumArt()
+                }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .keyboardShortcut("r", modifiers: .command)
+        }
+
+        // Break the trailing toolbar group into two Liquid Glass pills —
+        // sort + refresh in one, the primary "add" affordance in its own.
+        // macOS 15 doesn't have toolbar pills, so the spacer is a no-op
+        // there; items just sit next to each other.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showAddSheet = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .disabled(!store.isAuthorized)
         }
     }
 }

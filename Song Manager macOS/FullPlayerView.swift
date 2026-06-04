@@ -117,7 +117,7 @@ struct FullPlayerView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .compatGlass(.regularInteractive, in: Circle())
             .padding(.leading, 16)
             .padding(.top, 14)
 
@@ -168,7 +168,7 @@ struct FullPlayerView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .compatGlass(.regularInteractive, in: Capsule())
             .padding(.trailing, 16)
             .padding(.top, 14)
         }
@@ -343,7 +343,7 @@ struct FullPlayerView: View {
                 Spacer()
             }
         } else {
-            GlassEffectContainer(spacing: 8) {
+            CompatGlassContainer(spacing: 8) {
                 HStack(spacing: 8) {
                     trackCombo
                     Spacer(minLength: 8)
@@ -385,7 +385,7 @@ struct FullPlayerView: View {
             }
             .buttonStyle(.plain)
         }
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .compatGlass(.regularInteractive, in: Capsule())
     }
 
     private func recordingMicButton(project: ProjectReference) -> some View {
@@ -413,7 +413,7 @@ struct FullPlayerView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
+        .compatGlass(.regularInteractive, in: Circle())
     }
 
     private var transcriptBubble: some View {
@@ -432,7 +432,7 @@ struct FullPlayerView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: 320, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .compatGlass(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Note pins
@@ -479,8 +479,8 @@ struct FullPlayerView: View {
             // narrow width.
             .frame(maxWidth: 320, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
-            .glassEffect(
-                .regular.interactive(),
+            .compatGlass(
+                .regularInteractive,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -566,7 +566,7 @@ struct FullPlayerView: View {
             }
             .buttonStyle(.plain)
         }
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .compatGlass(.regularInteractive, in: Capsule())
     }
 
     /// `.glassEffect` applied OUTSIDE the Button (not on the Image
@@ -582,7 +582,7 @@ struct FullPlayerView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
+        .compatGlass(.regularInteractive, in: Circle())
         .keyboardShortcut(.space, modifiers: [])
     }
 

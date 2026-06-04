@@ -8,7 +8,12 @@ import UniformTypeIdentifiers
 struct SongCard: View {
     let project: ProjectReference
     var store: SongStore
+    /// Closure invoked when the "Create New Version" tile-button is
+    /// tapped. The alert it presents is owned by ContentView, so the
+    /// card hands the action up rather than driving the sheet itself.
+    var onCreateNewVersion: () -> Void = {}
     @State private var isDropTargeted = false
+    @State private var showActionsMenu = false
 
     var body: some View {
         Color.clear
@@ -16,6 +21,7 @@ struct SongCard: View {
             .overlay { artLayer }
             .overlay(alignment: .topLeading) { titleOverlay }
             .overlay(alignment: .topTrailing) { starOverlay }
+            // .overlay(alignment: .bottomLeading) { actionsOverlay }  // hidden for now; helpers kept below
             .overlay(alignment: .bottomTrailing) { playButtonOverlay }
             .overlay {
                 if isDropTargeted {
@@ -98,14 +104,74 @@ struct SongCard: View {
         }
     }
 
+    /// Bottom-left overflow affordance — single glass circle with an
+    /// ellipsis that opens a popover containing the three file actions.
+    /// Uses the proven `playButtonOverlay` recipe (bare Image +
+    /// `.glassEffect` + `.highPriorityGesture`) so the symbol stays full
+    /// white AND the tap wins over the card-level "open full player"
+    /// gesture. A `Menu` here doesn't work — its internal tap loses to
+    /// the card's `.onTapGesture`, so taps would fall through to play.
+    @ViewBuilder
+    private var actionsOverlay: some View {
+        Image(systemName: "ellipsis")
+            .font(.system(size: 16, weight: .bold))
+            .foregroundStyle(.white)
+            .symbolRenderingMode(.monochrome)
+            .frame(width: 40, height: 40)
+            .compatGlass(.clear, in: Circle())
+            .contentShape(Circle())
+            .highPriorityGesture(
+                TapGesture().onEnded { showActionsMenu.toggle() }
+            )
+            .popover(isPresented: $showActionsMenu, arrowEdge: .top) {
+                actionsPopoverContent
+            }
+            .padding(12)
+    }
+
+    /// Popover body rendered when the ellipsis is tapped. Three rows,
+    /// each greyed out when the song folder isn't synced locally.
+    @ViewBuilder
+    private var actionsPopoverContent: some View {
+        let enabled = SongStore.localFolderURL(for: project) != nil
+        VStack(alignment: .leading, spacing: 0) {
+            actionRow(systemName: "folder", title: "Reveal in Finder", enabled: enabled) {
+                store.showInFinder(project)
+            }
+            actionRow(systemName: "music.note", title: "Open Latest .als", enabled: enabled) {
+                store.openLatestALS(for: project)
+            }
+            actionRow(systemName: "plus.square.on.square", title: "Create New Version…", enabled: enabled) {
+                onCreateNewVersion()
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(minWidth: 200)
+    }
+
+    private func actionRow(systemName: String, title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            showActionsMenu = false
+            action()
+        } label: {
+            Label(title, systemImage: systemName)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
     /// Bottom-right play affordance. Stops the card-level tap (which
     /// opens the full player) and starts playback immediately instead.
     private var playButtonOverlay: some View {
         Image(systemName: "play.fill")
-            .font(.system(size: 22, weight: .semibold))
+            .font(.system(size: 18, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 56, height: 56)
-            .glassEffect(.clear, in: Circle())
+            .frame(width: 48, height: 48)
+            .compatGlass(.clear, in: Circle())
             .contentShape(Circle())
             .highPriorityGesture(
                 TapGesture().onEnded {

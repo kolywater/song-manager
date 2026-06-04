@@ -17,6 +17,10 @@ struct Adenel_SongsApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Album-art-forward grid was designed for a dark chrome;
+                // pinning the whole app to dark keeps the look consistent
+                // regardless of the system appearance setting.
+                .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     // The Dropbox redirect arrives as `db-<APPKEY>://...`.
                     // SwiftyDropbox parses the URL, stores the refresh

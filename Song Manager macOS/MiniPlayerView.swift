@@ -61,7 +61,7 @@ struct MiniPlayerView: View {
             .padding(.leading, 16)
             .padding(.trailing, 10)
             .padding(.vertical, 6)
-            .glassEffect(.clear, in: Capsule())
+            .compatGlass(.clear, in: Capsule())
             .frame(maxWidth: 600)
             .padding(.horizontal, 12)
             .padding(.bottom, 10)
