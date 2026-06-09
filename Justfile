@@ -159,3 +159,71 @@ run:
     echo ""
     echo "View logs: tmux attach -t $session_name"
     echo "Stop: tmux kill-session -t $session_name"
+
+# Cut a release: bump version, build Release, zip the .app, tag, and
+# publish to GitHub so the in-app updater can find it.
+#   just release 1.1
+[group('build')]
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    version="{{version}}"
+    # Digits-and-dots only (no leading "v"); the tag gets the v prefix.
+    if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "Usage: just release 1.1   (digits and dots only, no leading 'v')"
+        exit 1
+    fi
+    tag="v$version"
+
+    if git rev-parse "$tag" >/dev/null 2>&1; then
+        echo "Error: tag $tag already exists."
+        exit 1
+    fi
+
+    # Require a clean tree so the version-bump commit is self-contained.
+    # Commit your feature work before cutting a release.
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Error: working tree not clean — commit or stash changes first."
+        exit 1
+    fi
+
+    pbxproj="{{xcode_project_or_workspace}}/project.pbxproj"
+    echo "Bumping MARKETING_VERSION → $version"
+    # Bumps every target's MARKETING_VERSION (macOS + iOS stay in lockstep).
+    sed -i '' "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $version;/g" "$pbxproj"
+    git add "$pbxproj"
+    git commit -m "Release $tag"
+
+    # Build the macOS Release into build/macosx-Release/Applications/.
+    just build macosx Release
+
+    scheme="{{scheme_macosx}}"
+    app_path="{{_build_root}}/macosx-Release/Applications/$scheme.app"
+    if [[ ! -d "$app_path" ]]; then
+        echo "Error: built app not found at $app_path"
+        exit 1
+    fi
+
+    dist="{{_build_root}}/dist"
+    mkdir -p "$dist"
+    zip_path="$dist/SongManager-$version.zip"
+    rm -f "$zip_path"
+    echo "Zipping → $zip_path"
+    # --keepParent so the archive contains "<scheme>.app", which the
+    # updater's ditto extraction expects.
+    ditto -c -k --keepParent "$app_path" "$zip_path"
+
+    # Tag + push so the GitHub release attaches to the bump commit.
+    git tag "$tag"
+    git push origin HEAD
+    git push origin "$tag"
+
+    echo "Creating GitHub release $tag"
+    gh release create "$tag" "$zip_path" \
+        --title "$tag" \
+        --generate-notes
+
+    echo ""
+    echo "Released $tag"
+    echo "  asset: $zip_path"

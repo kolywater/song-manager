@@ -20,6 +20,27 @@ enum FileActions {
         return NSWorkspace.shared.open(latestALS)
     }
 
+    /// Open an arbitrary file (e.g. a freshly-created version) in its
+    /// default app. Returns false if the open failed.
+    @discardableResult
+    static func open(_ url: URL) -> Bool {
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Suggested next version string for this song, based on the most
+    /// recently *modified* `.als` at the root — that's the file the user
+    /// was last working on, regardless of how its version number sorts.
+    /// Bumps the final component at whatever decimal precision the latest
+    /// file uses ("Song 1.1" → "1.2", "Song 1.1.1" → "1.1.2"). Returns
+    /// nil if there are no `.als` files; "1.0" if the latest one has no
+    /// parseable version suffix.
+    static func suggestedNextVersion(in rootURL: URL) -> String? {
+        guard let latest = latestModifiedALS(in: rootURL) else { return nil }
+        let stem = latest.deletingPathExtension().lastPathComponent
+        guard let version = VersionService.parseVersion(fromStem: stem) else { return "1.0" }
+        return VersionService.suggestedBump(from: version)
+    }
+
     /// Duplicate the latest `.als` with a new version number. Strips any
     /// trailing version-like suffix from the source filename before
     /// appending the new version, so "Song 1.2.als" → "Song 1.3.als"
@@ -55,6 +76,25 @@ enum FileActions {
                 let vA = VersionService.parseVersion(fromStem: stemA) ?? []
                 let vB = VersionService.parseVersion(fromStem: stemB) ?? []
                 return VersionService.compare(vA, vB) == .orderedAscending
+            }
+    }
+
+    /// Most recently modified `.als` at the root of `rootURL`. Used to
+    /// derive the suggested next version — the latest file you touched is
+    /// a more reliable "current version" signal than version-number sort.
+    private static func latestModifiedALS(in rootURL: URL) -> URL? {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        return contents
+            .filter { $0.pathExtension.lowercased() == "als" }
+            .max { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da < db
             }
     }
 }

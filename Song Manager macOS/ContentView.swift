@@ -2,10 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var store = SongStore()
+    @State private var updater = Updater()
     @Environment(\.scenePhase) private var scenePhase
     @State private var showAddSheet = false
     @State private var newVersionProject: ProjectReference?
     @State private var newVersionText = ""
+    /// When true, the new version is opened in Ableton right after it's
+    /// created — drives the "Create New Version & Open" menu action.
+    @State private var newVersionOpensAfter = false
 
     /// Three flexible columns — column count is fixed, each cell sizes
     /// to fill its third of the available width (minus padding and
@@ -37,6 +41,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .dropboxAuthDidChange)) { _ in
             store.rebuildSourceFromKeychain()
         }
+        .task {
+            // Quiet background check on launch — only surfaces if an
+            // update is actually available.
+            await updater.check(userInitiated: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .checkForUpdatesRequested)) { _ in
+            Task { await updater.check(userInitiated: true) }
+        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task.detached { [store] in await store.pullLibraryFromDropbox() }
@@ -61,15 +73,15 @@ struct ContentView: View {
         .sheet(isPresented: $store.presentingFullPlayer) {
             FullPlayerView(store: store)
         }
-        .alert("Create New Version", isPresented: Binding(
+        .alert(newVersionOpensAfter ? "Create New Version & Open" : "Create New Version", isPresented: Binding(
             get: { newVersionProject != nil },
-            set: { if !$0 { newVersionProject = nil; newVersionText = "" } }
+            set: { if !$0 { newVersionProject = nil; newVersionText = ""; newVersionOpensAfter = false } }
         )) {
             TextField("Version (e.g. 1.3)", text: $newVersionText)
             Button("Cancel", role: .cancel) {}
-            Button("Create") {
+            Button(newVersionOpensAfter ? "Create & Open" : "Create") {
                 if let p = newVersionProject {
-                    store.duplicateLatestALS(for: p, version: newVersionText)
+                    store.duplicateLatestALS(for: p, version: newVersionText, openAfter: newVersionOpensAfter)
                 }
             }
         } message: {
@@ -78,6 +90,62 @@ struct ContentView: View {
             } else {
                 Text("Pick the version number for the new .als file.")
             }
+        }
+        .alert("Update Available", isPresented: Binding(
+            get: { updater.available != nil && !updater.isBusy },
+            set: { if !$0 { updater.clearResult() } }
+        )) {
+            Button("Install & Relaunch") {
+                Task { await updater.install() }
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            if let info = updater.available {
+                let notes = info.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                Text("Version \(info.version) is available (you have \(Updater.currentVersion))."
+                    + (notes.isEmpty ? "" : "\n\n\(notes)"))
+            }
+        }
+        .alert("Software Update", isPresented: Binding(
+            get: { updateInfoMessage != nil },
+            set: { if !$0 { updater.clearResult() } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let message = updateInfoMessage { Text(message) }
+        }
+        .overlay {
+            if updater.isBusy {
+                ZStack {
+                    Color.black.opacity(0.55).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(updater.status == .installing ? "Installing update…" : "Downloading update…")
+                            .font(.headline)
+                        Text("The app will relaunch automatically.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(28)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: updater.isBusy)
+    }
+
+    /// Message for the result alert shown after a user-initiated check —
+    /// either "up to date" or the failure reason. Nil otherwise.
+    private var updateInfoMessage: String? {
+        switch updater.status {
+        case .upToDate:
+            return "You're running the latest version (\(Updater.currentVersion))."
+        case .failed(let reason):
+            return "Couldn't check for updates.\n\n\(reason)"
+        default:
+            return nil
         }
     }
 
@@ -99,8 +167,7 @@ struct ContentView: View {
                                     project: project,
                                     store: store,
                                     onCreateNewVersion: {
-                                        newVersionProject = project
-                                        newVersionText = ""
+                                        presentNewVersion(for: project, opensAfter: false)
                                     }
                                 )
                                 .contextMenu {
@@ -129,6 +196,16 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Open the "Create New Version" alert for `project`, pre-filling the
+    /// field with the suggested next version (bumped from the most recently
+    /// modified `.als`). `opensAfter` carries the user's intent from the
+    /// menu through to the alert's confirm button.
+    private func presentNewVersion(for project: ProjectReference, opensAfter: Bool) {
+        newVersionProject = project
+        newVersionOpensAfter = opensAfter
+        newVersionText = store.suggestedNextVersion(for: project)
+    }
+
     @ViewBuilder
     private func contextMenu(for project: ProjectReference) -> some View {
         let localURL = SongStore.localFolderURL(for: project)
@@ -147,10 +224,16 @@ struct ContentView: View {
         .disabled(localURL == nil)
 
         Button {
-            newVersionProject = project
-            newVersionText = ""
+            presentNewVersion(for: project, opensAfter: false)
         } label: {
             Label("Create New Version…", systemImage: "plus.square.on.square")
+        }
+        .disabled(localURL == nil)
+
+        Button {
+            presentNewVersion(for: project, opensAfter: true)
+        } label: {
+            Label("Create New Version & Open…", systemImage: "square.and.pencil")
         }
         .disabled(localURL == nil)
 

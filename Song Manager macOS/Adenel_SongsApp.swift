@@ -35,6 +35,15 @@ struct Adenel_SongsApp: App {
         }
         .defaultSize(width: 980, height: 720)
         .windowResizability(.contentMinSize)
+        .commands {
+            // Sits just under the "About" item in the app menu. The check
+            // itself lives in ContentView's Updater; we just signal it.
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    NotificationCenter.default.post(name: .checkForUpdatesRequested, object: nil)
+                }
+            }
+        }
     }
 }
 
@@ -42,4 +51,8 @@ extension Notification.Name {
     /// Shared with iOS — both targets post this on successful OAuth
     /// completion so their SongStore can rebuild from the new token.
     static let dropboxAuthDidChange = Notification.Name("dropboxAuthDidChange")
+
+    /// Posted by the "Check for Updates…" menu command; ContentView's
+    /// Updater listens and runs a user-initiated check.
+    static let checkForUpdatesRequested = Notification.Name("checkForUpdatesRequested")
 }

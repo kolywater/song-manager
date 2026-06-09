@@ -204,17 +204,14 @@ struct SongCard: View {
             UTType($0)?.conforms(to: .image) == true
         } ?? "public.image"
         provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
-            guard let url else { return }
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-            try? FileManager.default.removeItem(at: tmp)
-            do {
-                try FileManager.default.copyItem(at: url, to: tmp)
-            } catch {
-                return
-            }
+            // The provided URL is only valid for the duration of this
+            // callback, so read the bytes synchronously here rather than
+            // copying to a temp file and racing an async upload against
+            // its own cleanup.
+            guard let url, let data = try? Data(contentsOf: url) else { return }
+            let ext = url.pathExtension.lowercased()
             DispatchQueue.main.async {
-                store.setAlbumArt(for: project, imageURL: tmp)
-                try? FileManager.default.removeItem(at: tmp)
+                store.setAlbumArt(for: project, imageData: data, fileExtension: ext)
             }
         }
         return true

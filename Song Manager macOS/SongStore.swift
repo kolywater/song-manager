@@ -428,7 +428,7 @@ final class SongStore {
     /// Drag-and-drop entry point on the song card. Reads the dropped
     /// image, uploads it to Dropbox at the canonical art path, then
     /// refreshes the local cache so the card repaints.
-    func setAlbumArt(for project: ProjectReference, imageURL: URL) {
+    func setAlbumArt(for project: ProjectReference, imageData data: Data, fileExtension ext: String) {
         guard let source else {
             errorMessage = "Dropbox not connected"
             return
@@ -436,13 +436,11 @@ final class SongStore {
         guard case .dropboxPath(let folderPath) = project.location else { return }
         Task {
             do {
-                let data = try Data(contentsOf: imageURL)
-                let ext = imageURL.pathExtension.lowercased().isEmpty ? "png" : imageURL.pathExtension.lowercased()
                 try await source.uploadAlbumArt(
                     forFolderPath: folderPath,
                     songName: project.displayName,
                     imageData: data,
-                    fileExtension: ext
+                    fileExtension: ext.isEmpty ? "png" : ext
                 )
                 await refreshAlbumArt(for: project)
             } catch {
@@ -988,10 +986,23 @@ final class SongStore {
         }
     }
 
+    /// Suggested next version for the "Create New Version" field, derived
+    /// from the most recently modified `.als` in the song folder. Empty
+    /// string when the folder isn't synced locally or has no `.als`, so
+    /// the field just starts blank in that case.
+    func suggestedNextVersion(for project: ProjectReference) -> String {
+        guard let url = Self.localFolderURL(for: project),
+              let suggestion = FileActions.suggestedNextVersion(in: url) else {
+            return ""
+        }
+        return suggestion
+    }
+
     /// Duplicate the latest `.als` with a new version number. After the
     /// duplicate lands on disk, refresh this project's activity date so
-    /// the Recent sort surfaces it.
-    func duplicateLatestALS(for project: ProjectReference, version: String) {
+    /// the Recent sort surfaces it. When `openAfter` is true, the new file
+    /// is opened in Ableton once it's written.
+    func duplicateLatestALS(for project: ProjectReference, version: String, openAfter: Bool = false) {
         guard let url = Self.localFolderURL(for: project) else {
             errorMessage = notLocalErrorMessage(for: project)
             return
@@ -1002,9 +1013,12 @@ final class SongStore {
             return
         }
         do {
-            guard let _ = try FileActions.duplicateLatestALS(in: url, version: trimmed) else {
+            guard let newURL = try FileActions.duplicateLatestALS(in: url, version: trimmed) else {
                 errorMessage = "No .als files in \(project.displayName)."
                 return
+            }
+            if openAfter {
+                FileActions.open(newURL)
             }
             Task { [weak self] in await self?.refreshActivityDate(for: project) }
         } catch {

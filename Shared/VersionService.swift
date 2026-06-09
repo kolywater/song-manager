@@ -3,6 +3,18 @@ import Foundation
 enum VersionService {
     static let versionPattern = try! Regex(" (\\d+(?:\\.\\d+)*)$")
 
+    /// Parse a bare version / git-tag string ("1.2", "v1.2.3") into its
+    /// integer components. Tolerates a leading "v". Returns nil if no
+    /// digits are present.
+    static func parse(versionString: String) -> [Int]? {
+        let trimmed = versionString.trimmingCharacters(in: .whitespaces)
+        let stripped = trimmed.hasPrefix("v") || trimmed.hasPrefix("V")
+            ? String(trimmed.dropFirst())
+            : trimmed
+        let parts = stripped.split(separator: ".").compactMap { Int($0) }
+        return parts.isEmpty ? nil : parts
+    }
+
     static func parseVersion(fromStem stem: String) -> [Int]? {
         guard let match = stem.firstMatch(of: versionPattern),
               let capture = match.output[1].substring else { return nil }
