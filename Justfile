@@ -181,10 +181,10 @@ release version:
         exit 1
     fi
 
-    # Require a clean tree so the version-bump commit is self-contained.
-    # Commit your feature work before cutting a release.
-    if [[ -n "$(git status --porcelain)" ]]; then
-        echo "Error: working tree not clean — commit or stash changes first."
+    # Require no uncommitted *tracked* changes so the version-bump commit
+    # is self-contained. Untracked files (scratch dirs, notes) are fine.
+    if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+        echo "Error: working tree has uncommitted changes — commit or stash first."
         exit 1
     fi
 
