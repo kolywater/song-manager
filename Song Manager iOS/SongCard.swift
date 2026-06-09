@@ -64,7 +64,7 @@ struct SongCard: View {
     private var playButtonOverlay: some View {
         Image(systemName: "play.fill")
             .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(playButtonForeground)
+            .foregroundStyle(.white)
             .frame(width: 56, height: 56)
             .glassEffect(.clear, in: Circle())
             .contentShape(Circle())
@@ -74,11 +74,6 @@ struct SongCard: View {
                 }
             )
             .padding(12)
-    }
-
-    private var playButtonForeground: Color {
-        // Burning Bridges art is light — white play icon disappears.
-        project.displayName.lowercased().contains("burning bridges") ? .black : .white
     }
 
     @ViewBuilder
