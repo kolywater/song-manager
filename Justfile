@@ -91,6 +91,48 @@ alias i := install
 # PROJECT-SPECIFIC RECIPES
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Rebuild and relaunch the Mac app (build → kill running instance → open)
+[group('build')]
+reload: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    app="{{_build_root}}/macosx-Debug/Applications/Song Manager.app"
+    pkill -x "Song Manager" 2>/dev/null || true
+    open "$app"
+    echo "Launched $app"
+
+# Launch the Mac app against a throwaway copy of the example project (no
+# Dropbox). Finder / Ableton / new-version all act on the copy, so the
+# committed example fixture is never mutated.
+[group('test')]
+example: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    scratch="{{_build_root}}/example-scratch"
+    rm -rf "$scratch"
+    mkdir -p "$scratch"
+    cp -R "example project" "$scratch/"
+    app="{{_build_root}}/macosx-Debug/Applications/Song Manager.app"
+    pkill -x "Song Manager" 2>/dev/null || true
+    SM_EXAMPLE_PATH="$scratch/example project" \
+        nohup "$app/Contents/MacOS/Song Manager" >/tmp/adenel-songs-example.log 2>&1 &
+    echo "Launched example mode against:"
+    echo "  $scratch/example project"
+    echo "Logs: /tmp/adenel-songs-example.log"
+
+# Run the standalone version-logic unit tests (no XCTest target needed)
+[group('test')]
+unit-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    bin="$(mktemp -t versiontests)"
+    swiftc Shared/VersionService.swift \
+           "Song Manager macOS/FileActions.swift" \
+           Tests/main.swift -o "$bin"
+    "$bin"
+
 # Build and copy app to project root
 [group('build')]
 export platform=_default_platform configuration=_default_configuration: (build platform configuration)

@@ -41,21 +41,45 @@ enum FileActions {
         return VersionService.suggestedBump(from: version)
     }
 
-    /// Duplicate the latest `.als` with a new version number. Strips any
-    /// trailing version-like suffix from the source filename before
-    /// appending the new version, so "Song 1.2.als" → "Song 1.3.als"
-    /// rather than "Song 1.2 1.3.als". Throws on filesystem errors;
-    /// returns nil if no .als exists.
+    /// Duplicate the latest `.als` with a new version number. Derives the
+    /// base name by stripping the version token *and* anything after it
+    /// from the source filename, so "Song 1.2.als" → "Song 1.3.als" and
+    /// "Song 1.2 chris feedback.als" → "Song 1.3.als" (the new version
+    /// starts from a clean name). Throws on filesystem errors; returns nil
+    /// if no .als exists.
     @discardableResult
     static func duplicateLatestALS(in rootURL: URL, version: String) throws -> URL? {
         guard let latestALS = latestALS(in: rootURL) else { return nil }
         let stem = latestALS.deletingPathExtension().lastPathComponent
-        let baseName = String(stem).replacing(VersionService.versionPattern, with: "")
-            .trimmingCharacters(in: .whitespaces)
+        let baseName = VersionService.splitVersion(fromStem: stem).base
         let newFilename = "\(baseName) \(version).als"
         let destinationURL = rootURL.appending(path: newFilename)
         try FileManager.default.copyItem(at: latestALS, to: destinationURL)
         return destinationURL
+    }
+
+    /// Filenames of the up-to-`limit` most recently modified `.als` files
+    /// at the root of `rootURL`, ordered oldest → newest. Shown for
+    /// reference in the "Create New Version" dialog so the user can see
+    /// what's already there. Returns stems (no `.als` extension); empty if
+    /// none.
+    static func recentALSStems(in rootURL: URL, limit: Int = 5) -> [String] {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return contents
+            .filter { $0.pathExtension.lowercased() == "als" }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da > db
+            }
+            .prefix(limit)             // the `limit` newest…
+            .reversed()                // …shown oldest → newest
+            .map { $0.deletingPathExtension().lastPathComponent }
     }
 
     /// Highest-versioned `.als` at the root of `rootURL`. Versions are

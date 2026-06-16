@@ -141,7 +141,7 @@ struct SongCard: View {
             actionRow(systemName: "music.note", title: "Open Latest .als", enabled: enabled) {
                 store.openLatestALS(for: project)
             }
-            actionRow(systemName: "plus.square.on.square", title: "Create New Version…", enabled: enabled) {
+            actionRow(systemName: "plus.square.on.square", title: "New Version…", enabled: enabled) {
                 onCreateNewVersion()
             }
         }

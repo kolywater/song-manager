@@ -12,6 +12,10 @@ Export/
 # Song data (large binary files)
 Songs/
 
+# Local test fixture — real Ableton project (~125MB of bounces/backups).
+# Used by `just example` and the version unit tests when present locally.
+example project/
+
 # App icon source
 appIcon.icon/
 

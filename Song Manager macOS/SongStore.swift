@@ -44,11 +44,20 @@ final class SongStore {
     private var artInFlight: Set<UUID> = []
     private var notesInFlight: Set<UUID> = []
 
-    var isAuthorized: Bool { source != nil }
+    var isAuthorized: Bool { source != nil || ExampleMode.isActive }
 
     init() {
         let url = Self.defaultRegistryURL()
         self.registryURL = url
+
+        // Example mode (`just example`): no Dropbox, no on-disk registry —
+        // just show the single example project read straight off disk.
+        if ExampleMode.isActive {
+            self.source = nil
+            if let project = ExampleMode.project() { self.projects = [project] }
+            return
+        }
+
         do {
             self.source = try DropboxProjectSource(storageURL: url)
         } catch {
@@ -390,6 +399,17 @@ final class SongStore {
         if let data = try? Data(contentsOf: cacheURL),
            let image = NSImage(data: data) {
             albumArt[project.id] = image
+            return
+        }
+
+        // Example mode: read the art straight from the folder's _ALBUM ART.
+        if ExampleMode.isActive {
+            if let artURL = ExampleMode.albumArtURL(),
+               let data = try? Data(contentsOf: artURL),
+               let image = NSImage(data: data) {
+                try? data.write(to: cacheURL, options: .atomic)
+                albumArt[project.id] = image
+            }
             return
         }
 
@@ -767,6 +787,22 @@ final class SongStore {
         audio.preparePlayback(for: project)
         if showPlayer { presentingFullPlayer = true }
 
+        // Example mode: play the highest-versioned local bounce directly.
+        if ExampleMode.isActive {
+            if let bounceURL = ExampleMode.latestBounceURL() {
+                audio.load(url: bounceURL, project: project, filename: bounceURL.lastPathComponent, artwork: albumArt[project.id], autoStart: autoStart)
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.waveform.loadWaveform(for: project, audioURL: bounceURL, audioKey: bounceURL.lastPathComponent)
+                }
+            } else {
+                errorMessage = "No bounces in \(project.displayName)."
+                audio.stop()
+                presentingFullPlayer = false
+            }
+            return
+        }
+
         if let source {
             do {
                 if let bounce = try await resolveAudio(source: source, project: project, folderPath: folderPath) {
@@ -961,6 +997,10 @@ final class SongStore {
     /// views can also query it (to decide whether to grey out the
     /// Finder / Ableton / New Version menu items).
     static func localFolderURL(for project: ProjectReference) -> URL? {
+        // Example mode shows exactly one project, backed by a real folder
+        // on disk — hand that straight back so Finder / Ableton / new-version
+        // all operate on it.
+        if let example = ExampleMode.folderURL { return example }
         guard case .dropboxPath(let path) = project.location else { return nil }
         return LocalDropboxFinder.localURL(forDropboxPath: path)
     }
@@ -996,6 +1036,14 @@ final class SongStore {
             return ""
         }
         return suggestion
+    }
+
+    /// The most recently modified `.als` stems in the song folder (up to
+    /// `limit`), shown for reference in the new-version dialog. Empty when
+    /// the folder isn't synced locally.
+    func recentALSStems(for project: ProjectReference, limit: Int = 5) -> [String] {
+        guard let url = Self.localFolderURL(for: project) else { return [] }
+        return FileActions.recentALSStems(in: url, limit: limit)
     }
 
     /// Duplicate the latest `.als` with a new version number. After the

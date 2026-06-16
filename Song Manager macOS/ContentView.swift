@@ -7,9 +7,9 @@ struct ContentView: View {
     @State private var showAddSheet = false
     @State private var newVersionProject: ProjectReference?
     @State private var newVersionText = ""
-    /// When true, the new version is opened in Ableton right after it's
-    /// created — drives the "Create New Version & Open" menu action.
-    @State private var newVersionOpensAfter = false
+    /// Recent `.als` stems in the selected song's folder, listed for
+    /// reference inside the new-version dialog.
+    @State private var newVersionRecentFiles: [String] = []
 
     /// Three flexible columns — column count is fixed, each cell sizes
     /// to fill its third of the available width (minus padding and
@@ -73,22 +73,27 @@ struct ContentView: View {
         .sheet(isPresented: $store.presentingFullPlayer) {
             FullPlayerView(store: store)
         }
-        .alert(newVersionOpensAfter ? "Create New Version & Open" : "Create New Version", isPresented: Binding(
+        .alert("Create New Version", isPresented: Binding(
             get: { newVersionProject != nil },
-            set: { if !$0 { newVersionProject = nil; newVersionText = ""; newVersionOpensAfter = false } }
+            set: { if !$0 { newVersionProject = nil; newVersionText = ""; newVersionRecentFiles = [] } }
         )) {
             TextField("Version (e.g. 1.3)", text: $newVersionText)
-            Button("Cancel", role: .cancel) {}
-            Button(newVersionOpensAfter ? "Create & Open" : "Create") {
+            Button("Create") {
                 if let p = newVersionProject {
-                    store.duplicateLatestALS(for: p, version: newVersionText, openAfter: newVersionOpensAfter)
+                    store.duplicateLatestALS(for: p, version: newVersionText, openAfter: false)
                 }
             }
+            Button("Create & Open") {
+                if let p = newVersionProject {
+                    store.duplicateLatestALS(for: p, version: newVersionText, openAfter: true)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            if let current = newVersionProject?.latestVersionString {
-                Text("Current version: \(current)")
-            } else {
+            if newVersionRecentFiles.isEmpty {
                 Text("Pick the version number for the new .als file.")
+            } else {
+                Text("Recent files:\n" + newVersionRecentFiles.map { "•  \($0)" }.joined(separator: "\n"))
             }
         }
         .alert("Update Available", isPresented: Binding(
@@ -167,7 +172,7 @@ struct ContentView: View {
                                     project: project,
                                     store: store,
                                     onCreateNewVersion: {
-                                        presentNewVersion(for: project, opensAfter: false)
+                                        presentNewVersion(for: project)
                                     }
                                 )
                                 .contextMenu {
@@ -198,42 +203,35 @@ struct ContentView: View {
 
     /// Open the "Create New Version" alert for `project`, pre-filling the
     /// field with the suggested next version (bumped from the most recently
-    /// modified `.als`). `opensAfter` carries the user's intent from the
-    /// menu through to the alert's confirm button.
-    private func presentNewVersion(for project: ProjectReference, opensAfter: Bool) {
+    /// modified `.als`) and listing recent `.als` files for reference. The
+    /// alert itself offers both "Create" and "Create & Open".
+    private func presentNewVersion(for project: ProjectReference) {
         newVersionProject = project
-        newVersionOpensAfter = opensAfter
         newVersionText = store.suggestedNextVersion(for: project)
+        newVersionRecentFiles = store.recentALSStems(for: project)
     }
 
     @ViewBuilder
     private func contextMenu(for project: ProjectReference) -> some View {
         let localURL = SongStore.localFolderURL(for: project)
         Button {
-            store.showInFinder(project)
+            presentNewVersion(for: project)
         } label: {
-            Label("Reveal in Finder", systemImage: "folder")
+            Label("New Version", systemImage: "plus.square.on.square")
         }
         .disabled(localURL == nil)
 
         Button {
             store.openLatestALS(for: project)
         } label: {
-            Label("Open Latest .als", systemImage: "music.note")
+            Label("Open Latest", systemImage: "music.note")
         }
         .disabled(localURL == nil)
 
         Button {
-            presentNewVersion(for: project, opensAfter: false)
+            store.showInFinder(project)
         } label: {
-            Label("Create New Version…", systemImage: "plus.square.on.square")
-        }
-        .disabled(localURL == nil)
-
-        Button {
-            presentNewVersion(for: project, opensAfter: true)
-        } label: {
-            Label("Create New Version & Open…", systemImage: "square.and.pencil")
+            Label("Show in Finder", systemImage: "folder")
         }
         .disabled(localURL == nil)
 
