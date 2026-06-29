@@ -115,6 +115,82 @@ if FileManager.default.fileExists(atPath: example.path) {
     print("⚠︎ skipping example-project integration tests (folder not found at \(example.path))")
 }
 
+// MARK: - SyncMerge: note operations (conflict-safe sync)
+
+func applyOp(_ op: SyncMerge.NoteOp, to notes: [Note]) -> [Note] {
+    var n = notes
+    SyncMerge.apply(op, to: &n)
+    return n
+}
+
+let nid1 = UUID(), nid2 = UUID(), nid3 = UUID()
+let baseNotes = [Note(id: nid1, time: 3.0, text: "three"),
+                 Note(id: nid2, time: 1.0, text: "one")]
+
+// upsert (add) inserts and keeps the list time-sorted.
+expect(applyOp(.upsert(Note(id: nid3, time: 2.0, text: "two")), to: baseNotes).map(\.text),
+       ["one", "two", "three"], "upsert adds and sorts by time")
+
+// upsert on an existing id replaces in place — never duplicates (idempotent retry).
+let upReplaced = applyOp(.upsert(Note(id: nid1, time: 3.0, text: "THREE")), to: baseNotes)
+expect(upReplaced.count, 2, "upsert by existing id does not duplicate")
+expect(upReplaced.first(where: { $0.id == nid1 })?.text, "THREE", "upsert replaces by id")
+
+// replaceIfPresent edits an existing note...
+expect(applyOp(.replaceIfPresent(Note(id: nid2, time: 1.0, text: "ONE")), to: baseNotes)
+        .first(where: { $0.id == nid2 })?.text, "ONE", "replaceIfPresent edits existing")
+
+// ...but SKIPS a note that isn't there — the no-resurrection guarantee.
+let skipped = applyOp(.replaceIfPresent(Note(id: nid3, time: 5.0, text: "ghost")), to: baseNotes)
+expect(skipped.count, 2, "replaceIfPresent skips when id absent (no resurrection)")
+expect(skipped.contains(where: { $0.id == nid3 }), false, "replaceIfPresent adds no ghost")
+
+// remove deletes by id and is idempotent.
+let removed = applyOp(.remove(nid1), to: baseNotes)
+expect(removed.map(\.id), [nid2], "remove deletes by id")
+expect(applyOp(.remove(nid1), to: removed).map(\.id), [nid2], "remove is idempotent")
+
+// Op-replay: another device deleted nid1 (server is now [nid2]); replaying our
+// local "add nid3" onto the FRESH server list must keep nid1 gone.
+let merged = applyOp(.upsert(Note(id: nid3, time: 2.0, text: "two")), to: [baseNotes[1]])
+expect(merged.contains(where: { $0.id == nid1 }), false, "op-replay: deleted note stays gone")
+expect(merged.contains(where: { $0.id == nid3 }), true, "op-replay: local add preserved")
+
+// MARK: - SyncMerge: library entry updates
+
+var lib = LibraryDocument(items: [LibraryEntry(displayName: "Peaches", addedAt: Date())])
+expect(SyncMerge.updateEntry("peaches", in: &lib) { $0.starred = true }, true,
+       "updateEntry matches case-insensitively")
+expect(lib.items.first?.starred, true, "updateEntry mutates the entry")
+// A field change to a song that was removed elsewhere is dropped, not recreated.
+expect(SyncMerge.updateEntry("ghost song", in: &lib) { $0.starred = true }, false,
+       "updateEntry no-ops when song absent")
+expect(lib.items.count, 1, "updateEntry does not recreate a removed song")
+
+// MARK: - Codec: notes-only NotesDocument (v3) + legacy migration tolerance
+
+// A legacy v2 file (with the metadata that moved to the library) decodes —
+// the metadata keys are ignored and only the notes survive.
+let legacyNotesJSON = """
+{"version":2,"notes":[{"id":"\(nid1.uuidString)","time":1.0,"text":"hi","tags":[],"createdAt":0}],"starred":true,"selectedAudioPath":"bounces/x.wav","pinWatermark":0}
+"""
+let decodedNotes = try! JSONDecoder().decode(NotesDocument.self, from: Data(legacyNotesJSON.utf8))
+expect(decodedNotes.notes.count, 1, "legacy v2 notes file still decodes its notes")
+// Re-encoding produces a notes-only document (the relocated keys are gone).
+let reencoded = String(data: try! JSONEncoder().encode(decodedNotes), encoding: .utf8)!
+expect(reencoded.contains("starred"), false, "re-encoded notes doc drops starred")
+expect(reencoded.contains("selectedAudioPath"), false, "re-encoded notes doc drops selectedAudioPath")
+expect(reencoded.contains("pinWatermark"), false, "re-encoded notes doc drops pinWatermark")
+
+// A legacy library entry (pre-v2, no relocated fields) decodes with safe defaults.
+let legacyEntryJSON = """
+{"displayName":"X","addedAt":0,"hideTitle":true,"status":"released"}
+"""
+let decodedEntry = try! JSONDecoder().decode(LibraryEntry.self, from: Data(legacyEntryJSON.utf8))
+expect(decodedEntry.starred, false, "legacy entry defaults starred=false")
+expect(decodedEntry.selectedAudioPath, nil, "legacy entry defaults selectedAudioPath=nil")
+expect(decodedEntry.pinWatermark, nil, "legacy entry defaults pinWatermark=nil")
+
 // MARK: - Report
 
 if failures.isEmpty {

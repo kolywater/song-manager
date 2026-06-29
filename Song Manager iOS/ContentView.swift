@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @State private var store = SongStore()
@@ -142,6 +143,24 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            // Leaving the foreground: keep the app alive briefly so any
+            // in-flight note/metadata upload finishes instead of being
+            // stranded half-sent on the device.
+            if phase == .background {
+                var bgTask = UIBackgroundTaskIdentifier.invalid
+                bgTask = UIApplication.shared.beginBackgroundTask(withName: "FlushPendingWrites") {
+                    UIApplication.shared.endBackgroundTask(bgTask)
+                    bgTask = .invalid
+                }
+                Task { [store] in
+                    await store.flushPendingWrites()
+                    if bgTask != .invalid {
+                        UIApplication.shared.endBackgroundTask(bgTask)
+                        bgTask = .invalid
+                    }
+                }
+                return
+            }
             // Detached: the refresh fans out Dropbox calls and shouldn't
             // hold up scene activation. The await points inside suspend
             // on network I/O, so main isn't blocked either way.

@@ -130,6 +130,10 @@ unit-tests:
     bin="$(mktemp -t versiontests)"
     swiftc Shared/VersionService.swift \
            "Song Manager macOS/FileActions.swift" \
+           Shared/Note.swift \
+           Shared/SongStatus.swift \
+           Shared/LibraryDocument.swift \
+           Shared/SyncMerge.swift \
            Tests/main.swift -o "$bin"
     "$bin"
 

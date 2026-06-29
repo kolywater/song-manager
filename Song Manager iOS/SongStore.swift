@@ -53,6 +53,13 @@ final class SongStore {
     private let registryURL: URL
     private var artInFlight: Set<UUID> = []
     private var notesInFlight: Set<UUID> = []
+    /// Dropbox `rev` of each song's notes file as last seen. `nil` (or
+    /// absent) means "not loaded / doesn't exist" → a write starts as
+    /// `.add` and self-corrects to `.update` via the conflict path.
+    private var notesRev: [UUID: String?] = [:]
+    /// Count of in-flight guarded Dropbox writes. `flushPendingWrites()`
+    /// drains this on backgrounding so an edit can't be stranded mid-upload.
+    private var pendingWrites = 0
 
     var isAuthorized: Bool { source != nil }
 
@@ -202,7 +209,9 @@ final class SongStore {
     func setStatus(_ newStatus: SongStatus, for project: ProjectReference) async {
         status[project.id] = newStatus
         saveStatusToDisk()
-        await pushLibraryToDropbox()
+        await guardedLibraryWrite { doc in
+            SyncMerge.updateEntry(project.displayName, in: &doc) { $0.status = newStatus }
+        }
     }
 
     private static func loadHideTitleFromDisk() -> [UUID: Bool] {
@@ -222,9 +231,12 @@ final class SongStore {
     }
 
     func toggleHideTitle(_ project: ProjectReference) async {
-        hideTitle[project.id] = !(hideTitle[project.id] ?? false)
+        let newValue = !(hideTitle[project.id] ?? false)
+        hideTitle[project.id] = newValue
         saveHideTitleToDisk()
-        await pushLibraryToDropbox()
+        await guardedLibraryWrite { doc in
+            SyncMerge.updateEntry(project.displayName, in: &doc) { $0.hideTitle = newValue }
+        }
     }
 
     /// Local mirror of NotesDocument.pinWatermark so the sticky-pin
@@ -356,7 +368,12 @@ final class SongStore {
         Task { [weak self] in
             await self?.refreshActivityDate(for: project)
         }
-        Task { [weak self] in await self?.pushLibraryToDropbox() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.guardedLibraryWrite { doc in
+                self.upsertEntry(for: project, in: &doc) { _ in }
+            }
+        }
     }
 
     func refreshActivityDates() async {
@@ -419,12 +436,24 @@ final class SongStore {
         activityDates.removeValue(forKey: project.id)
         hideTitle.removeValue(forKey: project.id)
         status.removeValue(forKey: project.id)
+        starred.removeValue(forKey: project.id)
+        selectedAudioPath.removeValue(forKey: project.id)
+        pinWatermark.removeValue(forKey: project.id)
         saveActivityDates()
         saveHideTitleToDisk()
         saveStatusToDisk()
+        saveStarredToDisk()
+        saveSelectedAudioToDisk()
+        savePinWatermarkToDisk()
         try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
         waveform.invalidate(for: project.id)
-        Task { [weak self] in await self?.pushLibraryToDropbox() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.guardedLibraryWrite { doc in
+                let key = project.displayName.lowercased()
+                doc.items.removeAll { $0.id == key }
+            }
+        }
     }
 
     // MARK: - Library sync (Dropbox-backed registry)
@@ -432,21 +461,16 @@ final class SongStore {
     /// Push the current `projects` up to Dropbox as a `LibraryDocument`.
     /// Best-effort: failures surface as a toast but don't undo local
     /// state — `saveRegistry()` has already persisted the local cache.
+    /// Seed/ensure every local project has a library entry, without
+    /// clobbering remote field values: existing entries are left untouched,
+    /// missing ones are created from in-memory state. Per-field changes go
+    /// through their own guarded ops, not this.
     func pushLibraryToDropbox() async {
-        guard let source else { return }
-        let items = projects.map { project in
-            LibraryEntry(
-                displayName: project.displayName,
-                addedAt: Date(),
-                hideTitle: hideTitle[project.id] ?? false,
-                status: status[project.id] ?? .inProgress
-            )
-        }
-        let doc = LibraryDocument(modifiedAt: Date(), items: items)
-        do {
-            try await source.saveLibrary(doc)
-        } catch {
-            handleDropboxError(error)
+        let snapshot = projects
+        await guardedLibraryWrite { doc in
+            for project in snapshot {
+                self.upsertEntry(for: project, in: &doc) { _ in }
+            }
         }
     }
 
@@ -456,8 +480,12 @@ final class SongStore {
     func pullLibraryFromDropbox() async {
         guard let source else { return }
         do {
-            if let remote = try await source.loadLibrary() {
-                reconcileLibrary(remote, source: source)
+            if let remote = try await source.loadLibraryRevisioned() {
+                // One-time lift of per-song metadata into the library, then
+                // reconcile against the (possibly-migrated) doc so the lifted
+                // fields hydrate into memory on this same launch.
+                let doc = await migrateLibraryIfNeeded(remote, source: source)
+                reconcileLibrary(doc, source: source)
                 source.saveRegistry(projects)
             } else if !projects.isEmpty {
                 await pushLibraryToDropbox()
@@ -470,6 +498,43 @@ final class SongStore {
                 handleDropboxError(error)
             }
         }
+    }
+
+    /// One-time schema v1 → v2 migration: lift each song's per-song metadata
+    /// (starred / selectedAudioPath / pinWatermark) out of its legacy combined
+    /// notes file into the matching `LibraryEntry`, strip the notes file to
+    /// notes-only, then bump the library schema and push it. Idempotent and
+    /// fully rev-guarded — a conflict or transient failure simply leaves the
+    /// schema below current so the next pull retries. Returns the doc to
+    /// reconcile (migrated when it ran, otherwise the pulled doc unchanged).
+    private func migrateLibraryIfNeeded(
+        _ remote: DropboxProjectSource.Revisioned<LibraryDocument>,
+        source: DropboxProjectSource
+    ) async -> LibraryDocument {
+        guard remote.doc.schemaVersion < LibraryDocument.currentSchemaVersion else {
+            return remote.doc
+        }
+        var doc = remote.doc
+        for i in doc.items.indices {
+            let project = ProjectReference(
+                displayName: doc.items[i].displayName,
+                location: .dropboxPath("\(source.rootPath)/\(doc.items[i].displayName)")
+            )
+            guard let legacy = try? await source.loadLegacyNotesMetadata(for: project) else { continue }
+            doc.items[i].starred = legacy.starred ?? false
+            doc.items[i].selectedAudioPath = legacy.selectedAudioPath
+            doc.items[i].pinWatermark = legacy.pinWatermark
+            // Strip the per-song file to notes-only. rev-guarded, best-effort:
+            // if it conflicts/fails the vestigial fields are simply ignored.
+            if let notesDoc = try? await source.loadNotesRevisioned(for: project) {
+                _ = try? await source.saveNotesRevisioned(
+                    NotesDocument(notes: notesDoc.doc.notes), for: project, baseRev: notesDoc.rev)
+            }
+        }
+        doc.schemaVersion = LibraryDocument.currentSchemaVersion
+        doc.modifiedAt = Date()
+        _ = try? await source.saveLibraryRevisioned(doc, baseRev: remote.rev)
+        return doc
     }
 
     /// Apply the remote library to `projects`, keyed on lowercased
@@ -485,6 +550,9 @@ final class SongStore {
         var rebuilt: [ProjectReference] = []
         var hideTitleDirty = false
         var statusDirty = false
+        var starredDirty = false
+        var selectedDirty = false
+        var pinDirty = false
         for entry in remote.items {
             let key = entry.displayName.lowercased()
             let project: ProjectReference
@@ -506,6 +574,19 @@ final class SongStore {
                 status[project.id] = entry.status
                 statusDirty = true
             }
+            // Per-song metadata that now lives on the entry (schema v2).
+            if (starred[project.id] ?? false) != entry.starred {
+                starred[project.id] = entry.starred
+                starredDirty = true
+            }
+            if selectedAudioPath[project.id] != entry.selectedAudioPath {
+                selectedAudioPath[project.id] = entry.selectedAudioPath
+                selectedDirty = true
+            }
+            if pinWatermark[project.id] != entry.pinWatermark {
+                pinWatermark[project.id] = entry.pinWatermark
+                pinDirty = true
+            }
         }
         let keptIDs = Set(rebuilt.map(\.id))
         for project in projects where !keptIDs.contains(project.id) {
@@ -514,13 +595,22 @@ final class SongStore {
             activityDates.removeValue(forKey: project.id)
             hideTitle.removeValue(forKey: project.id)
             status.removeValue(forKey: project.id)
+            starred.removeValue(forKey: project.id)
+            selectedAudioPath.removeValue(forKey: project.id)
+            pinWatermark.removeValue(forKey: project.id)
             try? FileManager.default.removeItem(at: Self.albumArtCacheURL(for: project.id))
             waveform.invalidate(for: project.id)
             hideTitleDirty = true
             statusDirty = true
+            starredDirty = true
+            selectedDirty = true
+            pinDirty = true
         }
         if hideTitleDirty { saveHideTitleToDisk() }
         if statusDirty { saveStatusToDisk() }
+        if starredDirty { saveStarredToDisk() }
+        if selectedDirty { saveSelectedAudioToDisk() }
+        if pinDirty { savePinWatermarkToDisk() }
         projects = rebuilt
     }
 
@@ -667,80 +757,170 @@ final class SongStore {
         defer { notesInFlight.remove(project.id) }
 
         do {
-            let doc = try await source.loadNotes(for: project)
-            notes[project.id] = doc.notes
-            if starred[project.id] != doc.starred {
-                starred[project.id] = doc.starred
-                saveStarredToDisk()
-            }
-            if selectedAudioPath[project.id] != doc.selectedAudioPath {
-                selectedAudioPath[project.id] = doc.selectedAudioPath
-                saveSelectedAudioToDisk()
-            }
-            if pinWatermark[project.id] != doc.pinWatermark {
-                pinWatermark[project.id] = doc.pinWatermark
-                savePinWatermarkToDisk()
-            }
+            let result = try await source.loadNotesRevisioned(for: project)
+            notes[project.id] = result.doc.notes
+            notesRev[project.id] = result.rev
         } catch {
-            notes[project.id] = []
+            // Leave any existing in-memory notes intact — never zero them.
+            // A transient pull failure must not be able to feed an empty
+            // list into the next write. starred / selectedAudioPath /
+            // pinWatermark now live on the LibraryEntry (hydrated by the
+            // library pull), so they're no longer touched here.
         }
     }
 
     func addNote(_ note: Note, to project: ProjectReference) async {
-        guard let source else { return }
         var stamped = note
         if stamped.version == nil {
             stamped.version = audio.currentVersion
         }
-        var current = notes[project.id] ?? []
-        current.append(stamped)
-        current.sort { $0.time < $1.time }
-        notes[project.id] = current
-        await persistDoc(for: project, source: source)
+        await guardedNotesWrite(for: project, op: .upsert(stamped))
     }
 
     func removeNote(_ note: Note, from project: ProjectReference) async {
-        guard let source else { return }
-        var current = notes[project.id] ?? []
-        current.removeAll { $0.id == note.id }
-        notes[project.id] = current
-        await persistDoc(for: project, source: source)
+        await guardedNotesWrite(for: project, op: .remove(note.id))
     }
 
-    /// Replace an existing note in place (matched by id). Falls back to
-    /// append if the note isn't found, so a stale edit session doesn't
-    /// silently lose changes.
+    /// Edit an existing note. Replace-by-id, but **skip if the note is gone**
+    /// (deleted on another device) — an edit must never resurrect it.
     func updateNote(_ note: Note, in project: ProjectReference) async {
-        guard let source else { return }
-        var current = notes[project.id] ?? []
-        if let idx = current.firstIndex(where: { $0.id == note.id }) {
-            current[idx] = note
-        } else {
-            current.append(note)
-        }
-        current.sort { $0.time < $1.time }
-        notes[project.id] = current
-        await persistDoc(for: project, source: source)
+        await guardedNotesWrite(for: project, op: .replaceIfPresent(note))
     }
 
     func toggleStarred(_ project: ProjectReference) async {
-        starred[project.id] = !(starred[project.id] ?? false)
+        let newValue = !(starred[project.id] ?? false)
+        starred[project.id] = newValue
         saveStarredToDisk()
-        guard let source else { return }
-        await persistDoc(for: project, source: source)
+        await guardedLibraryWrite { doc in
+            SyncMerge.updateEntry(project.displayName, in: &doc) { $0.starred = newValue }
+        }
     }
 
-    private func persistDoc(for project: ProjectReference, source: DropboxProjectSource) async {
-        let doc = NotesDocument(
-            notes: notes[project.id] ?? [],
+    /// Liveness check for the open player: fetch just the notes file's `rev`
+    /// and reload the notes only if it changed since we last loaded them.
+    /// Skips the download (and the resulting re-render) when nothing changed.
+    func refreshNotesIfChanged(for project: ProjectReference) async {
+        guard let source else { return }
+        // Don't reload over an in-flight local write — let it land first.
+        guard pendingWrites == 0 else { return }
+        guard let latest = await source.latestNotesRev(for: project) else { return }
+        // A write may have started during the metadata fetch above.
+        guard pendingWrites == 0 else { return }
+        if latest != (notesRev[project.id] ?? nil) {
+            await loadNotes(for: project)
+        }
+    }
+
+    /// Conflict-safe write of a single note operation. Applies the op to the
+    /// in-memory list optimistically (instant UI), then does a conditional
+    /// upload. On a server-side conflict it re-pulls the current notes, adopts
+    /// them as the base, and re-applies the op — so a note deleted on another
+    /// device is never resurrected and no edit is lost. Retries up to 5 times.
+    private func guardedNotesWrite(for project: ProjectReference, op: SyncMerge.NoteOp) async {
+        guard let source else { return }
+        pendingWrites += 1
+        defer { pendingWrites -= 1 }
+        for _ in 0..<5 {
+            var working = notes[project.id] ?? []
+            SyncMerge.apply(op, to: &working)
+            notes[project.id] = working
+            do {
+                let newRev = try await source.saveNotesRevisioned(
+                    NotesDocument(notes: working), for: project,
+                    baseRev: notesRev[project.id] ?? nil)
+                notesRev[project.id] = newRev
+                return
+            } catch DropboxProjectSource.DropboxSourceError.conflict {
+                if let fresh = try? await source.loadNotesRevisioned(for: project) {
+                    notes[project.id] = fresh.doc.notes
+                    notesRev[project.id] = fresh.rev
+                }
+                // loop: re-apply op to the freshly-pulled base
+            } catch {
+                handleDropboxError(error)
+                return
+            }
+        }
+        errorMessage = "Couldn't save note — Dropbox kept changing. Try again."
+    }
+
+    /// Conflict-safe write of a single library change. Re-pulls the current
+    /// library fresh on each attempt and uses *that* file's `rev` as the
+    /// write base, so two devices editing different songs (or different
+    /// fields of the same song) converge instead of clobbering: whoever
+    /// commits second gets a `rev` conflict and re-pulls the first's result.
+    private func guardedLibraryWrite(_ mutate: (inout LibraryDocument) -> Void) async {
+        guard let source else { return }
+        pendingWrites += 1
+        defer { pendingWrites -= 1 }
+        for _ in 0..<5 {
+            var base: LibraryDocument
+            var baseRev: String?
+            if let pulled = try? await source.loadLibraryRevisioned() {
+                base = pulled.doc
+                baseRev = pulled.rev
+            } else {
+                base = LibraryDocument(items: [])
+                baseRev = nil
+            }
+            mutate(&base)
+            base.modifiedAt = Date()
+            base.schemaVersion = LibraryDocument.currentSchemaVersion
+            do {
+                _ = try await source.saveLibraryRevisioned(base, baseRev: baseRev)
+                source.saveRegistry(projects)
+                return
+            } catch DropboxProjectSource.DropboxSourceError.conflict {
+                continue
+            } catch {
+                handleDropboxError(error)
+                return
+            }
+        }
+        errorMessage = "Couldn't sync library — Dropbox kept changing. Try again."
+    }
+
+    /// Wait (up to ~12s) for any in-flight guarded Dropbox writes to drain.
+    /// Called when the app enters the background — wrapped by the caller in a
+    /// UIKit background-task assertion — so a note or metadata edit can't be
+    /// stranded on the device with its upload only half-sent. No read-side
+    /// guard can recover an edit that never reached Dropbox's servers; this
+    /// is what makes sure it gets there.
+    func flushPendingWrites() async {
+        var ticks = 0
+        while pendingWrites > 0 && ticks < 120 {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+            ticks += 1
+        }
+    }
+
+    /// Snapshot the current in-memory per-song metadata into a fresh
+    /// `LibraryEntry`. Used only when *creating* an entry that doesn't yet
+    /// exist in the freshly-pulled library.
+    private func makeEntry(for project: ProjectReference) -> LibraryEntry {
+        LibraryEntry(
+            displayName: project.displayName,
+            addedAt: Date(),
+            hideTitle: hideTitle[project.id] ?? false,
+            status: status[project.id] ?? .inProgress,
             starred: starred[project.id] ?? false,
             selectedAudioPath: selectedAudioPath[project.id],
             pinWatermark: pinWatermark[project.id]
         )
-        do {
-            try await source.saveNotes(doc, for: project)
-        } catch {
-            handleDropboxError(error)
+    }
+
+    /// Create-or-update an entry by display name in a freshly-pulled library
+    /// doc. Use for `addProject`/seeding where the song *should* exist. For
+    /// field-change ops use `SyncMerge.updateEntry` instead (update-only, so a
+    /// song removed on another device isn't resurrected by a stray toggle).
+    private func upsertEntry(for project: ProjectReference, in doc: inout LibraryDocument, _ mutate: (inout LibraryEntry) -> Void) {
+        let key = project.displayName.lowercased()
+        if let idx = doc.items.firstIndex(where: { $0.id == key }) {
+            mutate(&doc.items[idx])
+        } else {
+            var entry = makeEntry(for: project)
+            mutate(&entry)
+            doc.items.append(entry)
         }
     }
 
@@ -766,11 +946,17 @@ final class SongStore {
     /// so the first bounce to appear releases the pin.
     func selectAudioFile(_ file: AudioFileMeta, for project: ProjectReference) async {
         guard let source else { return }
+        let watermark = await newestBounceModDate(for: project, source: source) ?? .distantPast
         selectedAudioPath[project.id] = file.relativePath
-        pinWatermark[project.id] = await newestBounceModDate(for: project, source: source) ?? .distantPast
+        pinWatermark[project.id] = watermark
         saveSelectedAudioToDisk()
         savePinWatermarkToDisk()
-        await persistDoc(for: project, source: source)
+        await guardedLibraryWrite { doc in
+            SyncMerge.updateEntry(project.displayName, in: &doc) {
+                $0.selectedAudioPath = file.relativePath
+                $0.pinWatermark = watermark
+            }
+        }
         await loadAndPlay(project: project, autoStart: audio.isPlaying)
     }
 
@@ -790,7 +976,12 @@ final class SongStore {
         pinWatermark[project.id] = nil
         saveSelectedAudioToDisk()
         savePinWatermarkToDisk()
-        await persistDoc(for: project, source: source)
+        await guardedLibraryWrite { doc in
+            SyncMerge.updateEntry(project.displayName, in: &doc) {
+                $0.selectedAudioPath = nil
+                $0.pinWatermark = nil
+            }
+        }
     }
 
     /// modDate of the newest bounce, preferring the already-loaded list to
@@ -908,7 +1099,9 @@ final class SongStore {
                     // forever).
                     pinWatermark[project.id] = latest.modDate
                     savePinWatermarkToDisk()
-                    await persistDoc(for: project, source: source)
+                    await guardedLibraryWrite { doc in
+                        SyncMerge.updateEntry(project.displayName, in: &doc) { $0.pinWatermark = latest.modDate }
+                    }
                 }
             }
             if let result = try await source.fetchAudioURL(forFolderPath: folderPath, relativePath: selected) {

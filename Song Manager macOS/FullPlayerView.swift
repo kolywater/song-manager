@@ -26,6 +26,21 @@ struct FullPlayerView: View {
             blurredBackground
             if let project = store.audio.nowPlaying {
                 timeline(project: project)
+                    .task(id: project.id) {
+                        // Refresh notes from Dropbox when the player opens, and
+                        // keep polling the file's rev while it stays open so a
+                        // note added on another device shows up live. `play()`
+                        // skips loadNotes for an already-loaded song, so without
+                        // this the timeline would sit on a stale session cache.
+                        // The task is cancelled when the sheet closes or the
+                        // song changes.
+                        await store.loadNotes(for: project)
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(6))
+                            if Task.isCancelled { break }
+                            await store.refreshNotesIfChanged(for: project)
+                        }
+                    }
                     .safeAreaInset(edge: .top, spacing: 0) {
                         // Header sits in the safe-area inset so the
                         // scroll content extends behind it but doesn't

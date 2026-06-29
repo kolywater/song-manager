@@ -32,6 +32,19 @@ struct FullPlayerView: View {
                 blurredBackground
                 if let project = store.audio.nowPlaying {
                     timeline(project: project)
+                        .task(id: project.id) {
+                            // Refresh notes when the player opens, then poll the
+                            // file's rev while it stays open so a note added on
+                            // another device shows up live. `play()` skips
+                            // loadNotes for an already-loaded song. Cancelled
+                            // when the player closes or the song changes.
+                            await store.loadNotes(for: project)
+                            while !Task.isCancelled {
+                                try? await Task.sleep(for: .seconds(6))
+                                if Task.isCancelled { break }
+                                await store.refreshNotesIfChanged(for: project)
+                            }
+                        }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .safeAreaInset(edge: .bottom, spacing: 0) {
                             // Transport floats over the scroll view; the

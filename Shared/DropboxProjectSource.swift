@@ -13,14 +13,38 @@ final class DropboxProjectSource: ProjectSource {
         case notAuthorized
         case authExpired
         case api(String)
+        /// The conditional write (`mode: .update(rev)`) was rejected because
+        /// the file changed on the server since we loaded it. Drives the
+        /// re-pull-and-replay retry loop in the stores; not user-facing.
+        case conflict
 
         var errorDescription: String? {
             switch self {
             case .notAuthorized: return "Dropbox not connected. Tap Connect to paste a refresh token."
             case .authExpired: return "Dropbox session expired — please reconnect."
             case .api(let message): return "Dropbox API error: \(message)"
+            case .conflict: return "Dropbox write conflict — the file changed on the server."
             }
         }
+    }
+
+    /// A decoded document paired with the Dropbox `rev` it was loaded at.
+    /// `rev == nil` means the file did not exist on the server, so a write
+    /// must create it with `mode: .add` rather than `.update(rev)`.
+    struct Revisioned<T> {
+        var doc: T
+        var rev: String?
+    }
+
+    /// Just the per-song metadata that lived in the legacy combined notes
+    /// file (schema v1). Decoded for the one-time lift into `LibraryEntry`;
+    /// every field is optional so a notes-only (already-migrated) file
+    /// decodes to all-nil. Kept separate from `NotesDocument` so that struct
+    /// can drop these fields without breaking migration.
+    struct LegacyNotesMetadata: Decodable {
+        var starred: Bool?
+        var selectedAudioPath: String?
+        var pinWatermark: Date?
     }
 
     /// SwiftyDropbox surfaces auth failures as `CallError.authError(...)`.
@@ -246,24 +270,59 @@ final class DropboxProjectSource: ProjectSource {
 
     private static let notesRootPath = "/music/aidenel songs/song notes"
 
-    func loadNotes(for project: ProjectReference) async throws -> NotesDocument {
+    /// Revisioned load: returns the decoded `NotesDocument` plus its `rev`.
+    /// A missing file is not an error — it yields an empty doc with `rev ==
+    /// nil` (write-as-`.add`). Real download/decode failures **propagate**
+    /// instead of being masked as an empty doc, so a transient failure can
+    /// never feed an empty list into a write.
+    func loadNotesRevisioned(for project: ProjectReference) async throws -> Revisioned<NotesDocument> {
         let path = Self.notesPath(for: project)
         do {
-            let data = try await downloadFile(path: path)
-            return try JSONDecoder().decode(NotesDocument.self, from: data)
-        } catch {
-            return NotesDocument()
+            let (data, rev) = try await downloadFileRevisioned(path: path)
+            let doc = try JSONDecoder().decode(NotesDocument.self, from: data)
+            return Revisioned(doc: doc, rev: rev)
+        } catch let err as DropboxSourceError where Self.isNotFound(err) {
+            return Revisioned(doc: NotesDocument(), rev: nil)
         }
     }
 
-    func saveNotes(_ doc: NotesDocument, for project: ProjectReference) async throws {
+    /// One-time migration support: decode just the per-song metadata fields
+    /// (starred / selectedAudioPath / pinWatermark) out of a legacy combined
+    /// notes file, independent of `NotesDocument`'s current shape (which is
+    /// notes-only from schema v2 on). Returns `nil` if the file is absent.
+    func loadLegacyNotesMetadata(for project: ProjectReference) async throws -> LegacyNotesMetadata? {
         let path = Self.notesPath(for: project)
-        // App-level write scoping — refuse to write outside song notes/.
+        do {
+            let data = try await downloadFile(path: path)
+            let raw = try JSONDecoder().decode(LegacyNotesMetadata.self, from: data)
+            return raw
+        } catch let err as DropboxSourceError where Self.isNotFound(err) {
+            return nil
+        }
+    }
+
+    /// Current `rev` of a song's notes file, or `nil` if it doesn't exist or
+    /// the lookup fails. A cheap metadata-only call (no download) used to poll
+    /// for changes while the player is open — compare against the last-loaded
+    /// `rev` and only re-download when it differs.
+    func latestNotesRev(for project: ProjectReference) async -> String? {
+        let path = Self.notesPath(for: project)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            client.files.getMetadata(path: path).response { response, _ in
+                continuation.resume(returning: (response as? Files.FileMetadata)?.rev)
+            }
+        }
+    }
+
+    /// Revisioned conditional save. Returns the new `rev`; throws
+    /// `DropboxSourceError.conflict` if the server copy moved since `baseRev`.
+    func saveNotesRevisioned(_ doc: NotesDocument, for project: ProjectReference, baseRev: String?) async throws -> String {
+        let path = Self.notesPath(for: project)
         guard path.lowercased().hasPrefix(Self.notesRootPath.lowercased() + "/") else {
             throw DropboxSourceError.api("Refused write outside song notes/: \(path)")
         }
         let data = try JSONEncoder().encode(doc)
-        try await uploadFile(path: path, data: data)
+        return try await uploadFileRevisioned(path: path, data: data, baseRev: baseRev)
     }
 
     private static func notesPath(for project: ProjectReference) -> String {
@@ -291,35 +350,31 @@ final class DropboxProjectSource: ProjectSource {
 
     /// Path used for the Dropbox-backed library file. Lives under
     /// `song notes/` because that's the only subfolder this app writes to
-    /// (see `writableSubfolder` and the `saveNotes` guard above). The leading
+    /// (see `writableSubfolder` and the `saveNotesRevisioned` guard above). The leading
     /// underscore keeps it out of folder pickers that would treat it as a song.
     private static let libraryPath = "\(notesRootPath)/_library.json"
 
-    /// Pulls the library file from Dropbox. Returns `nil` when the file
-    /// doesn't exist yet (first run on a fresh account). Throws on auth
-    /// or unexpected API errors so the caller can fall back to the local
-    /// cache. The local cache, not this method, is the offline path.
-    func loadLibrary() async throws -> LibraryDocument? {
+    /// Revisioned library load. Returns `nil` when the file doesn't exist
+    /// (first run), else the decoded doc plus its `rev`. Real errors propagate.
+    func loadLibraryRevisioned() async throws -> Revisioned<LibraryDocument>? {
         do {
-            let data = try await downloadFile(path: Self.libraryPath)
-            return try JSONDecoder().decode(LibraryDocument.self, from: data)
-        } catch let err as DropboxSourceError {
-            if Self.isNotFound(err) { return nil }
-            throw err
+            let (data, rev) = try await downloadFileRevisioned(path: Self.libraryPath)
+            let doc = try JSONDecoder().decode(LibraryDocument.self, from: data)
+            return Revisioned(doc: doc, rev: rev)
+        } catch let err as DropboxSourceError where Self.isNotFound(err) {
+            return nil
         }
     }
 
-    /// Uploads the library file to Dropbox, overwriting. The caller is
-    /// responsible for stamping `modifiedAt = Date()` immediately before
-    /// calling — we don't mutate the caller's value here so a retry
-    /// uploads the same bytes.
-    func saveLibrary(_ doc: LibraryDocument) async throws {
-        // App-level write scoping — refuse to write outside song notes/.
+    /// Revisioned conditional library save. Returns the new `rev`; throws
+    /// `DropboxSourceError.conflict` if the server copy moved since `baseRev`.
+    /// Caller stamps `modifiedAt`/`schemaVersion` before calling.
+    func saveLibraryRevisioned(_ doc: LibraryDocument, baseRev: String?) async throws -> String {
         guard Self.libraryPath.lowercased().hasPrefix(Self.notesRootPath.lowercased() + "/") else {
             throw DropboxSourceError.api("Refused write outside song notes/: \(Self.libraryPath)")
         }
         let data = try JSONEncoder().encode(doc)
-        try await uploadFile(path: Self.libraryPath, data: data)
+        return try await uploadFileRevisioned(path: Self.libraryPath, data: data, baseRev: baseRev)
     }
 
     private func uploadFile(path: String, data: Data) async throws {
@@ -333,6 +388,44 @@ final class DropboxProjectSource: ProjectSource {
                 continuation.resume(returning: ())
             }
         }
+    }
+
+    /// Conditional upload: create with `.add` when `baseRev == nil`, else
+    /// `.update(baseRev)` which Dropbox rejects (with a write-conflict) if the
+    /// file's current `rev` no longer matches. Returns the new `rev` on
+    /// success. Throws `DropboxSourceError.conflict` on a detected conflict so
+    /// the caller can re-pull and replay its operation.
+    private func uploadFileRevisioned(path: String, data: Data, baseRev: String?) async throws -> String {
+        let mode: Files.WriteMode = baseRev.map { .update($0) } ?? .add
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            client.files.upload(path: path, mode: mode, input: data).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: Self.mapUploadError(error))
+                    return
+                }
+                guard let metadata = response else {
+                    continuation.resume(throwing: DropboxSourceError.api("Empty upload response"))
+                    return
+                }
+                continuation.resume(returning: metadata.rev)
+            }
+        }
+    }
+
+    /// Upload errors are statically typed as `CallError<Files.UploadError>`, so
+    /// we pattern-match the real enum to spot the "file changed since you
+    /// loaded it" conflict that drives the retry loop — more robust than
+    /// string-sniffing for this one critical case. Anything else falls back to
+    /// the shared string-based `mapError`. A misclassification here is
+    /// fail-safe: the conditional write already prevented any clobber, so the
+    /// worst case is a missed retry surfacing as a toast.
+    private static func mapUploadError(_ error: CallError<Files.UploadError>) -> DropboxSourceError {
+        if case .routeError(let boxed, _, _, _) = error,
+           case .path(let writeFailed) = boxed.unboxed,
+           case .conflict = writeFailed.reason {
+            return .conflict
+        }
+        return mapError(error)
     }
 
     private func listFolder(path: String, recursive: Bool = false) async throws -> [Files.Metadata] {
@@ -398,6 +491,24 @@ final class DropboxProjectSource: ProjectSource {
                     return
                 }
                 continuation.resume(returning: response.1)
+            }
+        }
+    }
+
+    /// Like `downloadFile`, but also returns the file's current `rev` so a
+    /// later conditional write can detect server-side changes.
+    private func downloadFileRevisioned(path: String) async throws -> (data: Data, rev: String) {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(data: Data, rev: String), Error>) in
+            client.files.download(path: path).response { response, error in
+                if let error = error {
+                    continuation.resume(throwing: Self.mapError(error))
+                    return
+                }
+                guard let response else {
+                    continuation.resume(throwing: DropboxSourceError.api("Empty download response"))
+                    return
+                }
+                continuation.resume(returning: (response.1, response.0.rev))
             }
         }
     }
