@@ -214,6 +214,19 @@ struct ContentView: View {
     @ViewBuilder
     private func contextMenu(for project: ProjectReference) -> some View {
         let localURL = SongStore.localFolderURL(for: project)
+        let latestLabel = store.latestALSLabel(for: project)
+        let previousVersions = store.previousALSVersions(for: project)
+
+        Button {
+            store.openLatestALS(for: project)
+        } label: {
+            Label(latestLabel.map { "Open Latest (\($0))" } ?? "Open Latest",
+                  systemImage: "music.note")
+        }
+        .disabled(localURL == nil)
+
+        Divider()
+
         Button {
             presentNewVersion(for: project)
         } label: {
@@ -221,12 +234,7 @@ struct ContentView: View {
         }
         .disabled(localURL == nil)
 
-        Button {
-            store.openLatestALS(for: project)
-        } label: {
-            Label("Open Latest", systemImage: "music.note")
-        }
-        .disabled(localURL == nil)
+        Divider()
 
         Button {
             store.showInFinder(project)
@@ -234,6 +242,14 @@ struct ContentView: View {
             Label("Show in Finder", systemImage: "folder")
         }
         .disabled(localURL == nil)
+
+        ForEach(previousVersions, id: \.url) { version in
+            Button {
+                store.openALS(at: version.url)
+            } label: {
+                Label("Open Previous (\(version.label))", systemImage: "clock.arrow.circlepath")
+            }
+        }
 
         Divider()
 

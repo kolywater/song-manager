@@ -1209,6 +1209,29 @@ final class SongStore {
         }
     }
 
+    /// Display suffix ("[version] [notes]") of the latest `.als`, used to
+    /// label the "Open Latest (…)" menu item. Nil when the folder isn't
+    /// synced locally or has no `.als`.
+    func latestALSLabel(for project: ProjectReference) -> String? {
+        guard let url = Self.localFolderURL(for: project) else { return nil }
+        return FileActions.alsVersions(in: url).first?.label
+    }
+
+    /// Up to `limit` `.als` versions *below* the latest, highest-version
+    /// first, for the "Open Previous (…)" menu section. Empty when the
+    /// folder isn't synced locally or has one or fewer `.als` files.
+    func previousALSVersions(for project: ProjectReference, limit: Int = 3) -> [FileActions.ALSVersion] {
+        guard let url = Self.localFolderURL(for: project) else { return [] }
+        return Array(FileActions.alsVersions(in: url).dropFirst().prefix(limit))
+    }
+
+    /// Open a specific `.als` file in Ableton.
+    func openALS(at url: URL) {
+        if !FileActions.open(url) {
+            errorMessage = "Couldn't open \(url.lastPathComponent)."
+        }
+    }
+
     /// Suggested next version for the "Create New Version" field, derived
     /// from the most recently modified `.als` in the song folder. Empty
     /// string when the folder isn't synced locally or has no `.als`, so

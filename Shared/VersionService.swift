@@ -45,6 +45,19 @@ enum VersionService {
         return (base, version)
     }
 
+    /// The stem's suffix starting at the version token — the
+    /// "[version] [notes]" that follows the song name, e.g.
+    /// "Song 1.1 chris feedback" → "1.1 chris feedback". Uses the *last*
+    /// version token (like `splitVersion`). Returns the trimmed full stem
+    /// when there's no version token to anchor on.
+    static func versionSuffix(fromStem stem: String) -> String {
+        guard let match = stem.matches(of: versionPattern).last else {
+            return stem.trimmingCharacters(in: .whitespaces)
+        }
+        return String(stem[match.range.lowerBound...])
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     static func compare(_ a: [Int], _ b: [Int]) -> ComparisonResult {
         let count = max(a.count, b.count)
         for i in 0..<count {

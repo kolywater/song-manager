@@ -6,6 +6,15 @@ import AppKit
 /// is actually on disk. iOS never calls into here; it has no native
 /// Ableton or Finder.
 enum FileActions {
+    /// A single `.als` file at the root of a song folder, paired with the
+    /// display suffix that follows the song name ("[version] [notes]",
+    /// e.g. "1.2 chris feedback") and its parsed version components.
+    struct ALSVersion: Hashable {
+        let url: URL
+        let label: String
+        let version: [Int]
+    }
+
     /// Reveal the song folder in Finder.
     static func showInFinder(_ rootURL: URL) {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: rootURL.path(percentEncoded: false))
@@ -82,25 +91,34 @@ enum FileActions {
             .map { $0.deletingPathExtension().lastPathComponent }
     }
 
-    /// Highest-versioned `.als` at the root of `rootURL`. Versions are
-    /// parsed by `VersionService`; ties (or unparseable stems) fall back
-    /// to lexicographic order.
-    private static func latestALS(in rootURL: URL) -> URL? {
+    /// Every `.als` at the root of `rootURL`, sorted highest-version
+    /// first. Versions are parsed by `VersionService`; each entry carries
+    /// the stem suffix after the song name ("[version] [notes]") for
+    /// display. This is the single source of truth for "latest" and
+    /// "previous" — `latestALS` is just its first element.
+    static func alsVersions(in rootURL: URL) -> [ALSVersion] {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
             at: rootURL,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else { return nil }
+        ) else { return [] }
         return contents
             .filter { $0.pathExtension.lowercased() == "als" }
-            .max { a, b in
-                let stemA = a.deletingPathExtension().lastPathComponent
-                let stemB = b.deletingPathExtension().lastPathComponent
-                let vA = VersionService.parseVersion(fromStem: stemA) ?? []
-                let vB = VersionService.parseVersion(fromStem: stemB) ?? []
-                return VersionService.compare(vA, vB) == .orderedAscending
+            .map { url in
+                let stem = url.deletingPathExtension().lastPathComponent
+                return ALSVersion(
+                    url: url,
+                    label: VersionService.versionSuffix(fromStem: stem),
+                    version: VersionService.parseVersion(fromStem: stem) ?? []
+                )
             }
+            .sorted { VersionService.compare($0.version, $1.version) == .orderedDescending }
+    }
+
+    /// Highest-versioned `.als` at the root of `rootURL`, or nil if none.
+    private static func latestALS(in rootURL: URL) -> URL? {
+        alsVersions(in: rootURL).first?.url
     }
 
     /// Most recently modified `.als` at the root of `rootURL`. Used to
